@@ -144,6 +144,33 @@ namespace Calculator.Tests
         }
 
         [TestMethod]
+        public void ScientificPasteRequiresANumericOperand()
+        {
+            foreach (string candidate in new[] { "", "   ", "+", "-" })
+            {
+                Assert.AreEqual("NoOp", ValidateScientificPasteExpression(candidate), candidate);
+            }
+        }
+
+        [TestMethod]
+        public void ScientificPasteAllowsTerminalOperators()
+        {
+            foreach (string candidate in new[] { "50%", "1+" })
+            {
+                Assert.AreEqual(candidate, ValidateScientificPasteExpression(candidate), candidate);
+            }
+        }
+
+        [TestMethod]
+        public void ScientificPasteRejectsDigitsUnsupportedByCalculator()
+        {
+            foreach (string candidate in new[] { "１", "1+１", "1e+１" })
+            {
+                Assert.AreEqual("NoOp", ValidateScientificPasteExpression(candidate), candidate);
+            }
+        }
+
+        [TestMethod]
         public void ValidateProgrammerDecPasteExpressionTest()
         {
             // QWord
@@ -571,6 +598,48 @@ namespace Calculator.Tests
                 Assert.AreEqual(ValidateProgrammerBinBytePasteExpression(data), data);
             foreach (var data in byteNegativeInput)
                 Assert.AreEqual(ValidateProgrammerBinBytePasteExpression(data), "NoOp");
+        }
+
+        [TestMethod]
+        public void ProgrammerPrefixedValuesRespectByteAndWordRanges()
+        {
+            var cases = new[]
+            {
+                (Value: "0n127", Base: NumberBase.DecBase, Length: BitLength.BitLengthByte, Expected: "0n127"),
+                (Value: "0n128", Base: NumberBase.DecBase, Length: BitLength.BitLengthByte, Expected: "NoOp"),
+                (Value: "0n32767", Base: NumberBase.DecBase, Length: BitLength.BitLengthWord, Expected: "0n32767"),
+                (Value: "0n32768", Base: NumberBase.DecBase, Length: BitLength.BitLengthWord, Expected: "NoOp"),
+                (Value: "0o377", Base: NumberBase.OctBase, Length: BitLength.BitLengthByte, Expected: "0o377"),
+                (Value: "0o400", Base: NumberBase.OctBase, Length: BitLength.BitLengthByte, Expected: "NoOp"),
+                (Value: "0t177777", Base: NumberBase.OctBase, Length: BitLength.BitLengthWord, Expected: "0t177777"),
+                (Value: "0t200000", Base: NumberBase.OctBase, Length: BitLength.BitLengthWord, Expected: "NoOp"),
+                (Value: "0b11111111", Base: NumberBase.BinBase, Length: BitLength.BitLengthByte, Expected: "0b11111111"),
+                (Value: "0b100000000", Base: NumberBase.BinBase, Length: BitLength.BitLengthByte, Expected: "NoOp"),
+                (Value: "0y1111111111111111", Base: NumberBase.BinBase, Length: BitLength.BitLengthWord, Expected: "0y1111111111111111"),
+                (Value: "0y10000000000000000", Base: NumberBase.BinBase, Length: BitLength.BitLengthWord, Expected: "NoOp"),
+                (Value: "0xFF", Base: NumberBase.HexBase, Length: BitLength.BitLengthByte, Expected: "0xFF"),
+                (Value: "0x100", Base: NumberBase.HexBase, Length: BitLength.BitLengthByte, Expected: "NoOp"),
+                (Value: "0xFFFF", Base: NumberBase.HexBase, Length: BitLength.BitLengthWord, Expected: "0xFFFF"),
+                (Value: "0x10000", Base: NumberBase.HexBase, Length: BitLength.BitLengthWord, Expected: "NoOp"),
+            };
+
+            foreach (var testCase in cases)
+            {
+                Assert.AreEqual(
+                    testCase.Expected,
+                    CopyPasteManager.ValidatePasteExpression(
+                        testCase.Value,
+                        ViewMode.Programmer,
+                        testCase.Base,
+                        testCase.Length),
+                    testCase.Value);
+            }
+        }
+
+        [TestMethod]
+        public void BinaryZeroWithSuffixRemainsValid()
+        {
+            Assert.AreEqual("0b", ValidateProgrammerBinBytePasteExpression("0b"));
         }
 
         [TestMethod]

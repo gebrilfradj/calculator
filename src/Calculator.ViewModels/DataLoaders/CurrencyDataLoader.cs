@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using CalculatorApp.ViewModel.Common;
 using Windows.Data.Json;
@@ -63,6 +64,11 @@ namespace CalculatorApp.ViewModel.DataLoaders
         private readonly string _responseLanguage;
         private readonly bool _isRtlLanguage;
         private readonly object _currencyUnitsMutex = new object();
+
+        // Initial loads and explicit refreshes replace the same currency data.
+        private readonly SemaphoreSlim _loadGate = new SemaphoreSlim(1, 1);
+        internal Func<Task> LoadGateEnteredForTest { get; set; }
+        internal Action LoadGateExitedForTest { get; set; }
 
         private List<CurrencyUnit> _currencyUnits;
         private Dictionary<int, Dictionary<int, ConversionData>> _currencyRatioMap;
@@ -138,8 +144,20 @@ namespace CalculatorApp.ViewModel.DataLoaders
 
         public async void LoadData()
         {
-            if (!LoadFinished())
+            bool notified = false;
+            await _loadGate.WaitAsync().ConfigureAwait(false);
+            try
             {
+                if (LoadGateEnteredForTest != null)
+                {
+                    await LoadGateEnteredForTest().ConfigureAwait(false);
+                }
+
+                if (LoadFinished())
+                {
+                    return;
+                }
+
                 RegisterForNetworkBehaviorChanges();
 
                 bool didLoad = false;
@@ -150,8 +168,48 @@ namespace CalculatorApp.ViewModel.DataLoaders
                     didLoad = await TryLoadDataFromWebAsync();
                 }
 
-                UpdateDisplayedTimestamp();
+                // Timestamp formatting must not suppress load completion.
+                try
+                {
+                    UpdateDisplayedTimestamp();
+                }
+                catch (Exception ex)
+                {
+                    TraceLogger.GetInstance().LogPlatformException(
+                        ViewMode.Currency, nameof(UpdateDisplayedTimestamp), ex);
+                }
+
+                // Do not report a second completion if the callback itself throws.
+                notified = true;
                 NotifyDataLoadFinished(didLoad);
+            }
+            catch (Exception ex)
+            {
+                TraceLogger.GetInstance().LogPlatformException(
+                    ViewMode.Currency, nameof(LoadData), ex);
+                if (!notified)
+                {
+                    try
+                    {
+                        NotifyDataLoadFinished(false);
+                    }
+                    catch (Exception notifyEx)
+                    {
+                        TraceLogger.GetInstance().LogPlatformException(
+                            ViewMode.Currency, nameof(NotifyDataLoadFinished), notifyEx);
+                    }
+                }
+            }
+            finally
+            {
+                try
+                {
+                    LoadGateExitedForTest?.Invoke();
+                }
+                finally
+                {
+                    _loadGate.Release();
+                }
             }
         }
 
@@ -229,56 +287,63 @@ namespace CalculatorApp.ViewModel.DataLoaders
         {
             try
             {
-                if (_currencyRatioMap.TryGetValue(unit1Id, out var ratioMap))
+                double ratio;
+                string unit1Abbreviation = string.Empty;
+                string unit1Name = string.Empty;
+                string unit2Abbreviation = string.Empty;
+                string unit2Name = string.Empty;
+
+                lock (_currencyUnitsMutex)
                 {
-                    if (ratioMap.TryGetValue(unit2Id, out var convData))
+                    if (!_currencyRatioMap.TryGetValue(unit1Id, out var ratioMap)
+                        || !ratioMap.TryGetValue(unit2Id, out var convData))
                     {
-                        double ratio = convData.Ratio;
-                        double rounded = RoundCurrencyRatio(ratio);
+                        return (string.Empty, string.Empty);
+                    }
 
-                        var locSettings = LocalizationSettings.GetInstance();
-                        char digit = locSettings.GetDigitSymbolFromEnUsDigit('1');
-                        string digitSymbol = digit.ToString();
-                        string roundedFormat = _ratioFormatter.Format(rounded);
-
-                        // Look up the units by ID to get abbreviation and name
-                        string unit1Abbreviation = string.Empty;
-                        string unit1Name = string.Empty;
-                        string unit2Abbreviation = string.Empty;
-                        string unit2Name = string.Empty;
-
-                        lock (_currencyUnitsMutex)
+                    ratio = convData.Ratio;
+                    foreach (var unit in _currencyUnits)
+                    {
+                        if (unit.Id == unit1Id)
                         {
-                            foreach (var u in _currencyUnits)
-                            {
-                                if (u.Id == unit1Id)
-                                {
-                                    unit1Abbreviation = u.Abbreviation;
-                                    unit1Name = u.CountryName;
-                                }
-                                if (u.Id == unit2Id)
-                                {
-                                    unit2Abbreviation = u.Abbreviation;
-                                    unit2Name = u.CountryName;
-                                }
-                            }
+                            unit1Abbreviation = unit.Abbreviation;
+                            unit1Name = ComposeAccessibleName(unit);
                         }
-
-                        string ratioString = LocalizationStringUtil.GetLocalizedString(
-                            _ratioFormat, digitSymbol, unit1Abbreviation, roundedFormat, unit2Abbreviation);
-
-                        string accessibleRatioString = LocalizationStringUtil.GetLocalizedString(
-                            _ratioFormat, digitSymbol, unit1Name, roundedFormat, unit2Name);
-
-                        return (ratioString, accessibleRatioString);
+                        if (unit.Id == unit2Id)
+                        {
+                            unit2Abbreviation = unit.Abbreviation;
+                            unit2Name = ComposeAccessibleName(unit);
+                        }
                     }
                 }
+
+                double rounded = RoundCurrencyRatio(ratio);
+                var locSettings = LocalizationSettings.GetInstance();
+                string digitSymbol = locSettings.GetDigitSymbolFromEnUsDigit('1').ToString();
+                string roundedFormat = _ratioFormatter.Format(rounded);
+                string ratioString = LocalizationStringUtil.GetLocalizedString(
+                    _ratioFormat, digitSymbol, unit1Abbreviation, roundedFormat, unit2Abbreviation);
+                string accessibleRatioString = LocalizationStringUtil.GetLocalizedString(
+                    _ratioFormat, digitSymbol, unit1Name, roundedFormat, unit2Name);
+
+                return (ratioString, accessibleRatioString);
             }
             catch
             {
             }
 
             return (string.Empty, string.Empty);
+        }
+
+        /// <summary>
+        /// Screen readers get the country and currency names rather than the abbreviation, composed
+        /// the same way the unit list composes them so the two stay consistent.
+        /// </summary>
+        private static string ComposeAccessibleName(CurrencyUnit unit)
+        {
+            string firstName = unit.IsRtlLanguage ? unit.Name : unit.CountryName;
+            string secondName = unit.IsRtlLanguage ? unit.CountryName : unit.Name;
+            return firstName + " " + secondName;
         }
 
         public string GetCurrencyTimestamp()
@@ -310,8 +375,7 @@ namespace CalculatorApp.ViewModel.DataLoaders
                 }
 
                 bool loadComplete = false;
-                m_cacheTimestamp_raw = localSettings.Values[CurrencyDataLoaderConstants.CacheTimestampKey];
-                _cacheTimestamp = (DateTimeOffset)m_cacheTimestamp_raw;
+                _cacheTimestamp = (DateTimeOffset)localSettings.Values[CurrencyDataLoaderConstants.CacheTimestampKey];
 
                 if (Utils.IsDateTimeOlderThan(_cacheTimestamp, CurrencyDataLoaderConstants.DayDuration)
                     && _networkAccessBehavior == NetworkAccessBehavior.Normal)
@@ -326,14 +390,13 @@ namespace CalculatorApp.ViewModel.DataLoaders
 
                 return loadComplete;
             }
-            catch
+            catch (Exception ex)
             {
+                TraceLogger.GetInstance().LogPlatformException(
+                    ViewMode.Currency, nameof(TryLoadDataFromCacheAsync), ex);
                 return false;
             }
         }
-
-        // Backing field to preserve the raw boxed value from LocalSettings for round-tripping.
-        private object m_cacheTimestamp_raw;
 
         public async Task<bool> TryLoadDataFromWebAsync()
         {
@@ -383,22 +446,56 @@ namespace CalculatorApp.ViewModel.DataLoaders
 
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                TraceLogger.GetInstance().LogPlatformException(
+                    ViewMode.Currency, nameof(TryLoadDataFromWebAsync), ex);
                 return false;
             }
         }
 
         public async Task<bool> TryLoadDataFromWebOverrideAsync()
         {
-            _meteredOverrideSet = true;
-            bool didLoad = await TryLoadDataFromWebAsync();
-            if (!didLoad)
+            // Serialize with the initial load.
+            await _loadGate.WaitAsync().ConfigureAwait(false);
+            try
             {
-                _loadStatus = CurrencyLoadStatus.FailedToLoad;
-            }
+                if (LoadGateEnteredForTest != null)
+                {
+                    await LoadGateEnteredForTest().ConfigureAwait(false);
+                }
 
-            return didLoad;
+                _meteredOverrideSet = true;
+                bool didLoad = await TryLoadDataFromWebAsync();
+                if (!didLoad)
+                {
+                    _loadStatus = CurrencyLoadStatus.FailedToLoad;
+                }
+
+                // Timestamp formatting must not suppress the caller's completion path.
+                try
+                {
+                    UpdateDisplayedTimestamp();
+                }
+                catch (Exception ex)
+                {
+                    TraceLogger.GetInstance().LogPlatformException(
+                        ViewMode.Currency, nameof(UpdateDisplayedTimestamp), ex);
+                }
+
+                return didLoad;
+            }
+            finally
+            {
+                try
+                {
+                    LoadGateExitedForTest?.Invoke();
+                }
+                finally
+                {
+                    _loadGate.Release();
+                }
+            }
         }
 
         public void OnNetworkBehaviorChanged(NetworkAccessBehavior newBehavior)
@@ -406,8 +503,6 @@ namespace CalculatorApp.ViewModel.DataLoaders
             _networkAccessBehavior = newBehavior;
             _vmCallback?.NetworkBehaviorChanged(newBehavior);
         }
-
-        #region Private methods
 
         private void ResetLoadStatus()
         {
@@ -516,8 +611,8 @@ namespace CalculatorApp.ViewModel.DataLoaders
                 }
             }
 
-            // Sort by country name using locale-aware comparison.
-            staticData.Sort((a, b) => string.Compare(a.CountryName, b.CountryName, StringComparison.CurrentCulture));
+            staticData.Sort((a, b) =>
+                string.Compare(a.CountryName, b.CountryName, StringComparison.CurrentCulture));
 
             return true;
         }
@@ -839,7 +934,6 @@ namespace CalculatorApp.ViewModel.DataLoaders
             }
         }
 
-        #endregion
     }
 
     #region Supporting types

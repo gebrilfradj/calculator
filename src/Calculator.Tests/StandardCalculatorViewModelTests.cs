@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -9,9 +10,7 @@ using CalculatorApp.ViewModel.Common;
 
 namespace Calculator.Tests
 {
-    /// <summary>
-    /// Represents a test command with expected display and expression results.
-    /// </summary>
+    // A test command with its expected display and expression results.
     internal struct TestItem
     {
         public NumbersAndOperatorsEnum Command;
@@ -178,7 +177,7 @@ namespace Calculator.Tests
 
         #region Basic Arithmetic Tests
 
-        /// <summary>Expression: 135</summary>
+        // Expression: 135
         [TestMethod]
         public void ButtonPressedLeftHandOperandEnteredTest()
         {
@@ -192,7 +191,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 13.</summary>
+        // Expression: 13.
         [TestMethod]
         public void ButtonPressedLeftHandOperandAndDecimalEnteredTest()
         {
@@ -206,7 +205,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 13==</summary>
+        // Expression: 13==
         [TestMethod]
         public void ButtonPressedLeftHandOperandAndEqualsEnteredTest()
         {
@@ -221,7 +220,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 13+</summary>
+        // Expression: 13+
         [TestMethod]
         public void ButtonPressedLeftHandOperandAndOperationEnteredTest()
         {
@@ -235,7 +234,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 13+801</summary>
+        // Expression: 13+801
         [TestMethod]
         public void ButtonPressedRightHandOperandEnteredTest()
         {
@@ -252,7 +251,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 1+2=</summary>
+        // Expression: 1+2=
         [TestMethod]
         public void ButtonPressedAdditionWithEqualsTest()
         {
@@ -267,7 +266,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 1-2=</summary>
+        // Expression: 1-2=
         [TestMethod]
         public void ButtonPressedSubtractionWithEqualsTest()
         {
@@ -282,7 +281,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 3*5=</summary>
+        // Expression: 3*5=
         [TestMethod]
         public void ButtonPressedMultiplyWithEqualsTest()
         {
@@ -297,7 +296,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 9/3=</summary>
+        // Expression: 9/3=
         [TestMethod]
         public void ButtonPressedDivideTest()
         {
@@ -312,7 +311,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 7.555*3=</summary>
+        // Expression: 7.555*3=
         [TestMethod]
         public void ButtonPressedDecimalOperationTest()
         {
@@ -331,7 +330,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 7/0</summary>
+        // Expression: 7/0
         [TestMethod]
         public void ButtonPressedDivideByZeroNegativeTest()
         {
@@ -346,7 +345,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 8/2*</summary>
+        // Expression: 8/2*
         [TestMethod]
         public void ButtonPressedExpressionWithMultipleOperatorsTest()
         {
@@ -361,7 +360,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 8/+*2*</summary>
+        // Expression: 8/+*2*
         [TestMethod]
         public void ButtonPressedExpressionWithMultipleOperatorsInSuccessionTest()
         {
@@ -378,7 +377,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 8*2==</summary>
+        // Expression: 8*2==
         [TestMethod]
         public void ButtonPressedExpressionWithMultipleEqualsAfterEvaluateTest()
         {
@@ -394,7 +393,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 7-6 and Backspace</summary>
+        // Expression: 7-6 and Backspace
         [TestMethod]
         public void ButtonPressedExpressionWithBackSpaceTest()
         {
@@ -410,7 +409,7 @@ namespace Calculator.Tests
             ValidateViewModelByCommands(_viewModel, items, true);
         }
 
-        /// <summary>Expression: 91-68 and Clear</summary>
+        // Expression: 91-68 and Clear
         [TestMethod]
         public void ButtonPressedExpressionWithClearTest()
         {
@@ -431,7 +430,7 @@ namespace Calculator.Tests
 
         #region Paste Tests
 
-        /// <summary>Low-level test of character mapping</summary>
+        // Low-level test of character mapping
         [TestMethod]
         public void VerifyCorrectCharacterMapping()
         {
@@ -457,7 +456,7 @@ namespace Calculator.Tests
             Assert.AreEqual(NumbersAndOperatorsEnum.None, n);
         }
 
-        /// <summary>Various strings get pasted</summary>
+        // Various strings get pasted
         [TestMethod]
         public void PasteExpressions()
         {
@@ -623,12 +622,24 @@ namespace Calculator.Tests
             CompareVector(_viewModel.BinaryDigits, val);
         }
 
-        /// <summary>Test Button disabling in different Radixes (commented out in original)</summary>
         [TestMethod]
         public void ProgrammerModeButtonsDisable()
         {
-            // This test was commented out in the original C++ source.
-            // Keeping as placeholder to match original test structure.
+            var viewModel = new StandardCalculatorViewModel();
+            ChangeMode(viewModel, 2);
+
+            // Hex accepts A-F; the other radices do not, and the keypad reflects that.
+            viewModel.SwitchProgrammerModeBase(NumberBase.HexBase);
+            Assert.IsTrue(viewModel.AreHEXButtonsEnabled, "Hex digits should be available in hex.");
+
+            viewModel.SwitchProgrammerModeBase(NumberBase.DecBase);
+            Assert.IsFalse(viewModel.AreHEXButtonsEnabled, "Hex digits should be unavailable in decimal.");
+
+            viewModel.SwitchProgrammerModeBase(NumberBase.OctBase);
+            Assert.IsFalse(viewModel.AreHEXButtonsEnabled, "Hex digits should be unavailable in octal.");
+
+            viewModel.SwitchProgrammerModeBase(NumberBase.BinBase);
+            Assert.IsFalse(viewModel.AreHEXButtonsEnabled, "Hex digits should be unavailable in binary.");
         }
 
         [TestMethod]
@@ -1244,6 +1255,52 @@ namespace Calculator.Tests
             };
             ValidateViewModelByCommands(_viewModel, items4, false);
             Assert.AreEqual("Display is 1,001 minus", _viewModel.Announcement?.Announcement);
+        }
+
+        [TestMethod]
+        public void VerifyAnnouncementOmitsFeedbackWhenButtonSuppliesNone()
+        {
+            // Only the operator buttons carry an AuditoryFeedback resource. Every other button sends
+            // a bare NumbersAndOperatorsEnum, and its announcement must be the display value alone.
+            _viewModel.ButtonPressed.Execute(NumbersAndOperatorsEnum.Clear);
+            _viewModel.ButtonPressed.Execute(NumbersAndOperatorsEnum.One);
+
+            Assert.AreEqual("Display is 1", _viewModel.Announcement?.Announcement);
+        }
+
+        [TestMethod]
+        public void VerifyAnnouncementUsesLocalizedFeedbackNotTheCommandName()
+        {
+            _viewModel.ButtonPressed.Execute(NumbersAndOperatorsEnum.Clear);
+            _viewModel.ButtonPressed.Execute(NumbersAndOperatorsEnum.One);
+            _viewModel.ButtonPressed.Execute(new CalculatorButtonPressedEventArgs("mal", NumbersAndOperatorsEnum.Multiply));
+
+            Assert.AreEqual("Display is 1 mal", _viewModel.Announcement?.Announcement);
+        }
+
+        [TestMethod]
+        public void CalculatorButtonPressedEventArgsAcceptsSupportedShapesAndRejectsOthers()
+        {
+            Assert.AreEqual(
+                NumbersAndOperatorsEnum.Add,
+                CalculatorButtonPressedEventArgs.GetOperationFromCommandParameter(
+                    new CalculatorButtonPressedEventArgs("plus", NumbersAndOperatorsEnum.Add)));
+            Assert.AreEqual(
+                NumbersAndOperatorsEnum.Subtract,
+                CalculatorButtonPressedEventArgs.GetOperationFromCommandParameter((int)NumbersAndOperatorsEnum.Subtract));
+            Assert.AreEqual(
+                NumbersAndOperatorsEnum.Multiply,
+                CalculatorButtonPressedEventArgs.GetOperationFromCommandParameter(NumbersAndOperatorsEnum.Multiply));
+
+            try
+            {
+                CalculatorButtonPressedEventArgs.GetOperationFromCommandParameter(new object());
+                Assert.Fail("Unsupported command parameters must be rejected.");
+            }
+            catch (ArgumentException exception)
+            {
+                Assert.AreEqual("commandParameter", exception.ParamName);
+            }
         }
 
         #endregion

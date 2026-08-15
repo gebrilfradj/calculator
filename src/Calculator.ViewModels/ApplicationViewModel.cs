@@ -2,10 +2,8 @@
 
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Threading.Tasks;
-using System.Windows.Input;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -69,10 +67,6 @@ namespace CalculatorApp.ViewModel
             }
         }
 
-        public ICommand CopyCommand => new RelayCommand<object>(OnCopyCommand);
-
-        public ICommand PasteCommand => new RelayCommand<object>(OnPasteCommand);
-
         public Visibility ClearMemoryVisibility
         {
             get => NavCategory.IsCalculatorViewMode(_mode) ?
@@ -85,7 +79,7 @@ namespace CalculatorApp.ViewModel
             {
                 var snapshot = new ApplicationSnapshot();
                 snapshot.Mode = (int)_mode;
-                if (CalculatorViewModel != null)
+                if (NavCategory.IsCalculatorViewMode(_mode) && CalculatorViewModel != null)
                 {
                     snapshot.StandardCalculator = CalculatorViewModel.Snapshot;
                 }
@@ -179,10 +173,45 @@ namespace CalculatorApp.ViewModel
 
         public void RestoreFromSnapshot(ApplicationSnapshot snapshot)
         {
-            Mode = (ViewMode)snapshot.Mode;
-            if (snapshot.StandardCalculator != null)
+            SnapshotValidator.Validate(snapshot);
+            ViewMode initialMode = Mode;
+            try
             {
-                CalculatorViewModel.Snapshot = snapshot.StandardCalculator;
+                ViewMode snapshotMode = (ViewMode)snapshot.Mode;
+                Mode = snapshotMode;
+                if (snapshot.StandardCalculator != null && NavCategory.IsCalculatorViewMode(snapshotMode))
+                {
+                    CalculatorViewModel.Snapshot = snapshot.StandardCalculator;
+                }
+            }
+            catch
+            {
+                try
+                {
+                    RecoverAfterFailedSnapshot(initialMode);
+                }
+                catch (Exception recoveryException)
+                {
+                    TraceLogger.GetInstance().LogRecallError(
+                        $"RestoreFromSnapshot recovery failed. {recoveryException}");
+                }
+                throw;
+            }
+        }
+
+        private void RecoverAfterFailedSnapshot(ViewMode initialMode)
+        {
+            if (CalculatorViewModel == null && NavCategory.IsCalculatorViewMode(initialMode))
+            {
+                CalculatorViewModel = new StandardCalculatorViewModel();
+            }
+
+            CalculatorViewModel?.ResetAfterFailedSnapshot(
+                NavCategory.IsCalculatorViewMode(initialMode) ? initialMode : ViewMode.Standard);
+
+            if (_mode != initialMode)
+            {
+                Mode = initialMode;
             }
         }
 
@@ -242,31 +271,33 @@ namespace CalculatorApp.ViewModel
             OnPropertyChanged(nameof(ClearMemoryVisibility));
         }
 
-        private void OnCopyCommand(object param)
+        [RelayCommand]
+        private void OnCopy()
         {
             if (NavCategory.IsConverterViewMode(_mode))
             {
-                ConverterViewModel.OnCopyCommand(param);
+                ConverterViewModel.CopyCommand.Execute(null);
             }
             else if (NavCategory.IsDateCalculatorViewMode(_mode))
             {
-                DateCalcViewModel.OnCopyCommand(param);
+                DateCalcViewModel.CopyCommand.Execute(null);
             }
             else if (NavCategory.IsCalculatorViewMode(_mode))
             {
-                CalculatorViewModel.OnCopyCommand(param);
+                CalculatorViewModel.CopyCommand.Execute(null);
             }
         }
 
-        private void OnPasteCommand(object param)
+        [RelayCommand]
+        private void OnPaste()
         {
             if (NavCategory.IsConverterViewMode(_mode))
             {
-                ConverterViewModel.OnPasteCommand(param);
+                ConverterViewModel.PasteCommand.Execute(null);
             }
             else if (NavCategory.IsCalculatorViewMode(_mode))
             {
-                CalculatorViewModel.OnPasteCommand(param);
+                CalculatorViewModel.PasteCommand.Execute(null);
             }
         }
 

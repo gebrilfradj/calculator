@@ -207,15 +207,32 @@ namespace CalcManager.Interop
     runtimeclass ExpressionCommandWrapper
     {
         ExpressionCommandWrapper();
+
+        ExpressionCommandWrapper(
+            CommandType type,
+            Int32 command,
+            Int32[] commands,
+            Boolean isNegative,
+            Boolean isDecimalPresent,
+            Boolean isSciFmt);
+
         CommandType Type{ get; };
         Int32 Command{ get; };
         Int32[] Commands{ get; };
         Boolean IsNegative{ get; };
+        Boolean IsDecimalPresent{ get; };
+        Boolean IsSciFmt{ get; };
     };
 
     runtimeclass HistoryItemWrapper
     {
         HistoryItemWrapper();
+        HistoryItemWrapper(
+            HistoryToken[] tokens,
+            ExpressionCommandWrapper[] commands,
+            String expression,
+            String result);
+
         HistoryToken[] Tokens{ get; };
         ExpressionCommandWrapper[] Commands{ get; };
         String Expression{ get; };
@@ -271,6 +288,8 @@ namespace CalcManager.Interop
         void UpdateMaxIntDigits();
         Char DecimalSeparator{ get; };
         HistoryItemWrapper[] GetHistoryItems();
+        HistoryItemWrapper[] GetHistoryItemsForMode(CalculatorMode mode);
+        void SetHistoryItems(HistoryItemWrapper[] historyItems);
         HistoryItemWrapper GetHistoryItem(UInt32 index);
         Boolean RemoveHistoryItem(UInt32 index);
         void ClearHistory();

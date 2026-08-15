@@ -10,7 +10,7 @@ namespace Calculator.Tests
     [TestClass]
     public class HistoryTests
     {
-        // Command constants matching C++ Command enum values
+        // CalcManager command IDs used by the interop boundary.
         private const int CommandNULL = 0;
         private const int CommandSIGN = 80;
         private const int CommandCLEAR = 81;
@@ -61,9 +61,9 @@ namespace Calculator.Tests
         private void Cleanup()
         {
             m_standardViewModel.SendCommandToCalcManager(ModeBasic);
-            m_historyViewModel.OnClearCommand(null);
+            m_historyViewModel.ClearCommand.Execute(null);
             m_standardViewModel.SendCommandToCalcManager(ModeScientific);
-            m_historyViewModel.OnClearCommand(null);
+            m_historyViewModel.ClearCommand.Execute(null);
             m_standardViewModel.ResetCalcManager(false);
         }
 
@@ -184,7 +184,7 @@ namespace Calculator.Tests
             m_standardViewModel.SendCommandToCalcManager(CommandADD);
             m_standardViewModel.SendCommandToCalcManager(Command2);
             m_standardViewModel.SendCommandToCalcManager(CommandEQU);
-            m_historyViewModel.OnClearCommand(null);
+            m_historyViewModel.ClearCommand.Execute(null);
             Assert.AreEqual(0, m_historyViewModel.ItemsCount);
             Cleanup();
         }
@@ -195,7 +195,7 @@ namespace Calculator.Tests
             Initialize();
             Assert.AreEqual(0, m_historyViewModel.ItemsCount);
             m_standardViewModel.SendCommandToCalcManager(ModeScientific);
-            m_historyViewModel.OnClearCommand(null);
+            m_historyViewModel.ClearCommand.Execute(null);
             Assert.AreEqual(0, m_historyViewModel.ItemsCount);
             Cleanup();
         }
@@ -257,19 +257,51 @@ namespace Calculator.Tests
         }
 
         [TestMethod]
-        [Ignore("Requires UWP ResourceLoader")]
         public void TestHistoryItemWithPrettyExpressions()
         {
-            // This test requires Windows.ApplicationModel.Resources.ResourceLoader
-            // which is not available in .NET 8.0 (non-UWP) test projects.
+            Initialize();
+            m_standardViewModel.SendCommandToCalcManager(ModeScientific);
+            m_standardViewModel.SendCommandToCalcManager(Command2);
+            m_standardViewModel.SendCommandToCalcManager(CommandSQRT);
+            m_standardViewModel.SendCommandToCalcManager(CommandEQU);
+
+            var historyItem = (HistoryItemViewModel)m_historyViewModel.Items[m_historyViewModel.ItemsCount - 1];
+
+            // The stored expression is the readable form, not the raw command name.
+            Assert.IsFalse(string.IsNullOrEmpty(historyItem.Expression));
+            Assert.IsFalse(
+                historyItem.Expression.Contains("CommandSQRT"),
+                $"The expression shows a command name rather than a symbol: '{historyItem.Expression}'.");
+            Assert.AreEqual("1.4142135623730950488016887242097", historyItem.Result);
+            Cleanup();
         }
 
         [TestMethod]
-        [Ignore("Requires UWP ResourceLoader")]
-        public void TestHistoryItemWithPrettyExpressionsMixedRadix()
+        public void TestHistoryItemWithPrettyExpressionsAcrossAngleModes()
         {
-            // This test requires Windows.ApplicationModel.Resources.ResourceLoader
-            // which is not available in .NET 8.0 (non-UWP) test projects.
+            Initialize();
+            m_standardViewModel.SendCommandToCalcManager(ModeScientific);
+            m_standardViewModel.SendCommandToCalcManager(CommandDEG);
+            m_standardViewModel.SendCommandToCalcManager(Command1);
+            m_standardViewModel.SendCommandToCalcManager(CommandSIN);
+            m_standardViewModel.SendCommandToCalcManager(CommandADD);
+            m_standardViewModel.SendCommandToCalcManager(CommandRAD);
+            m_standardViewModel.SendCommandToCalcManager(Command1);
+            m_standardViewModel.SendCommandToCalcManager(CommandSIN);
+            m_standardViewModel.SendCommandToCalcManager(CommandADD);
+            m_standardViewModel.SendCommandToCalcManager(CommandGRAD);
+            m_standardViewModel.SendCommandToCalcManager(Command1);
+            m_standardViewModel.SendCommandToCalcManager(CommandSIN);
+            m_standardViewModel.SendCommandToCalcManager(CommandEQU);
+
+            var historyItem = (HistoryItemViewModel)m_historyViewModel.Items[m_historyViewModel.ItemsCount - 1];
+            var resources = AppResourceProvider.GetInstance();
+            string expected = resources.GetCEngineString("67") + "( 1 )   +   "
+                + resources.GetCEngineString("73") + "( 1 )   +   "
+                + resources.GetCEngineString("79") + "( 1 ) =";
+
+            Assert.AreEqual(expected, historyItem.Expression);
+            Cleanup();
         }
 
         [TestMethod]

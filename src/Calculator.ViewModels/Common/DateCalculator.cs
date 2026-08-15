@@ -45,18 +45,29 @@ namespace CalculatorApp.ViewModel.Common.DateCalculation
         private const int c_unitsGreaterThanDays = 3;
         private const int c_daysInWeek = 7;
 
+        // Dates are round-tripped through Windows.Foundation.DateTime, whose UniversalTime field
+        // counts from the FILETIME epoch, so anything earlier than 1601 cannot be represented.
+        // Note this is not the same floor as DateTimeOffset.MinValue, which is year 1.
+        private static readonly DateTimeOffset s_minSupportedDate = new DateTimeOffset(1601, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
         public static readonly DateDifference DateDifferenceUnknown = new DateDifference
         {
             Year = int.MinValue, Month = int.MinValue, Week = int.MinValue, Day = int.MinValue
         };
 
-        private readonly Calendar _calendar;
+        private Calendar _calendar;
 
         public DateCalculationEngine(string calendarIdentifier)
         {
-            _calendar = new Calendar();
-            _calendar.ChangeTimeZone("UTC");
-            _calendar.ChangeCalendarSystem(calendarIdentifier);
+            _calendar = CreateCalendar(calendarIdentifier);
+        }
+
+        private static Calendar CreateCalendar(string calendarIdentifier)
+        {
+            var calendar = new Calendar();
+            calendar.ChangeTimeZone("UTC");
+            calendar.ChangeCalendarSystem(calendarIdentifier);
+            return calendar;
         }
 
         public DateTimeOffset? AddDuration(DateTimeOffset startDate, DateDifference duration)
@@ -81,7 +92,7 @@ namespace CalculatorApp.ViewModel.Common.DateCalculation
             }
             catch (ArgumentException)
             {
-                _calendar.ChangeCalendarSystem(currentCalendarSystem);
+                _calendar = CreateCalendar(currentCalendarSystem);
                 return null;
             }
         }
@@ -106,7 +117,7 @@ namespace CalculatorApp.ViewModel.Common.DateCalculation
                 _calendar.ChangeCalendarSystem(currentCalendarSystem);
 
                 var dateTime = _calendar.GetDateTime();
-                if (dateTime.ToUniversalTime().Ticks >= 0)
+                if (dateTime.ToUniversalTime() >= s_minSupportedDate)
                 {
                     return dateTime;
                 }
@@ -114,7 +125,7 @@ namespace CalculatorApp.ViewModel.Common.DateCalculation
             }
             catch (ArgumentException)
             {
-                _calendar.ChangeCalendarSystem(currentCalendarSystem);
+                _calendar = CreateCalendar(currentCalendarSystem);
                 return null;
             }
         }
@@ -133,7 +144,6 @@ namespace CalculatorApp.ViewModel.Common.DateCalculation
                 startDate = date2;
                 endDate = date1;
             }
-
             var pivotDate = startDate;
             uint daysDiff = (uint)GetDifferenceInDays(startDate, endDate);
             uint[] differenceInDates = new uint[c_unitsOfDate];
@@ -158,13 +168,18 @@ namespace CalculatorApp.ViewModel.Common.DateCalculation
 
                             if (differenceInDates[unitIndex] != 0)
                             {
-                                try
+                                while (differenceInDates[unitIndex] != 0)
                                 {
-                                    pivotDate = AdjustCalendarDate(pivotDate, dateUnit, (int)differenceInDates[unitIndex]);
-                                }
-                                catch (ArgumentException)
-                                {
-                                    return null;
+                                    try
+                                    {
+                                        pivotDate = AdjustCalendarDate(tempPivotDate, dateUnit, (int)differenceInDates[unitIndex]);
+                                        break;
+                                    }
+                                    catch (ArgumentException)
+                                    {
+                                        // The day-based estimate can overshoot the calendar's upper bound.
+                                        differenceInDates[unitIndex] -= 1;
+                                    }
                                 }
                             }
 
@@ -192,13 +207,12 @@ namespace CalculatorApp.ViewModel.Common.DateCalculation
                                     }
                                     catch (ArgumentException)
                                     {
-                                        return null;
+                                        // The current pivot is valid; finish with smaller units.
+                                        break;
                                     }
                                 }
                             } while (tempDaysDiff != 0);
 
-                            tempPivotDate = AdjustCalendarDate(tempPivotDate, dateUnit, (int)differenceInDates[unitIndex]);
-                            pivotDate = tempPivotDate;
                             int signedDaysDiff = GetDifferenceInDays(pivotDate, endDate);
                             if (signedDaysDiff < 0) return null;
                             daysDiff = (uint)signedDaysDiff;
@@ -264,26 +278,37 @@ namespace CalculatorApp.ViewModel.Common.DateCalculation
             _calendar.SetDateTime(date);
 
             var currentCalendarSystem = _calendar.GetCalendarSystem();
-            if (currentCalendarSystem == CalendarIdentifiers.Japanese)
+            try
             {
-                _calendar.ChangeCalendarSystem(CalendarIdentifiers.Gregorian);
-            }
+                if (currentCalendarSystem == CalendarIdentifiers.Japanese)
+                {
+                    _calendar.ChangeCalendarSystem(CalendarIdentifiers.Gregorian);
+                }
 
-            switch (dateUnit)
+                switch (dateUnit)
+                {
+                    case DateUnit.Year:
+                        _calendar.AddYears(difference);
+                        break;
+                    case DateUnit.Month:
+                        _calendar.AddMonths(difference);
+                        break;
+                    case DateUnit.Week:
+                        _calendar.AddWeeks(difference);
+                        break;
+                }
+
+                _calendar.ChangeCalendarSystem(currentCalendarSystem);
+                return _calendar.GetDateTime();
+            }
+            finally
             {
-                case DateUnit.Year:
-                    _calendar.AddYears(difference);
-                    break;
-                case DateUnit.Month:
-                    _calendar.AddMonths(difference);
-                    break;
-                case DateUnit.Week:
-                    _calendar.AddWeeks(difference);
-                    break;
+                if (_calendar.GetCalendarSystem() != currentCalendarSystem)
+                {
+                    _calendar.SetDateTime(date);
+                    _calendar.ChangeCalendarSystem(currentCalendarSystem);
+                }
             }
-
-            _calendar.ChangeCalendarSystem(currentCalendarSystem);
-            return _calendar.GetDateTime();
         }
     }
 }

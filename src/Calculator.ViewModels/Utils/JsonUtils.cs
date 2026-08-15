@@ -71,11 +71,9 @@ namespace CalculatorApp.JsonUtils
         public OperandCommandAlias(ExpressionCommandWrapper cmd)
         {
             Commands = cmd.Commands;
-            // Operand-specific flags not directly available from wrapper,
-            // default to false
-            IsNegative = false;
-            IsDecimalPresent = false;
-            IsSciFmt = false;
+            IsNegative = cmd.IsNegative;
+            IsDecimalPresent = cmd.IsDecimalPresent;
+            IsSciFmt = cmd.IsSciFmt;
         }
     }
 
@@ -266,11 +264,46 @@ namespace CalculatorApp.JsonUtils
 
         public static ExpressionCommandWrapper MapCommandAlias(ICalcManagerIExprCommandAlias exprCmd)
         {
-            // Create an ExpressionCommandWrapper via the interop
-            // For snapshot deserialization, we create a wrapper with the appropriate type info
-            // Note: ExpressionCommandWrapper is immutable from the C# side; the wrapper carries
-            // the type/command metadata but cannot be reconstructed from alias data alone.
-            return new ExpressionCommandWrapper();
+            switch (exprCmd)
+            {
+                case UnaryCommandAlias unary:
+                    // Unary commands require one or two command codes.
+                    int[] unaryCommands = ToArray(unary.Commands);
+                    if (unaryCommands.Length != 1 && unaryCommands.Length != 2)
+                    {
+                        throw new ArgumentOutOfRangeException(
+                            nameof(exprCmd), unaryCommands.Length, "ill-formed unary command.");
+                    }
+
+                    return new ExpressionCommandWrapper(
+                        CommandType.UnaryCommand, 0, unaryCommands, false, false, false);
+                case BinaryCommandAlias binary:
+                    return new ExpressionCommandWrapper(
+                        CommandType.BinaryCommand, binary.Command, Array.Empty<int>(), false, false, false);
+                case OperandCommandAlias operand:
+                    return new ExpressionCommandWrapper(
+                        CommandType.OperandCommand,
+                        0,
+                        ToArray(operand.Commands),
+                        operand.IsNegative,
+                        operand.IsDecimalPresent,
+                        operand.IsSciFmt);
+                case ParenthesesAlias paren:
+                    return new ExpressionCommandWrapper(
+                        CommandType.Parentheses, paren.Command, Array.Empty<int>(), false, false, false);
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(exprCmd), exprCmd?.GetType(), "unhandled command alias type.");
+            }
+        }
+
+        private static int[] ToArray(IReadOnlyList<int> commands)
+        {
+            if (commands == null)
+            {
+                return Array.Empty<int>();
+            }
+
+            return commands as int[] ?? commands.ToArray();
         }
     }
 }

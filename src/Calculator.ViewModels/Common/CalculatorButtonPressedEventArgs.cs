@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using System;
+
 namespace CalculatorApp.ViewModel.Common
 {
     public sealed class CalculatorButtonPressedEventArgs
@@ -20,7 +22,17 @@ namespace CalculatorApp.ViewModel.Common
             {
                 return eventArgs.Operation;
             }
-            return (NumbersAndOperatorsEnum)commandParameter;
+            if (commandParameter is int operation)
+            {
+                return (NumbersAndOperatorsEnum)operation;
+            }
+            if (commandParameter is NumbersAndOperatorsEnum enumValue)
+            {
+                return enumValue;
+            }
+            throw new ArgumentException(
+                $"Unsupported command parameter: {commandParameter?.GetType().ToString() ?? "null"}",
+                nameof(commandParameter));
         }
 
         public static string GetAuditoryFeedbackFromCommandParameter(object commandParameter)

@@ -8,3 +8,6 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyCopyright("Copyright ©  2026")]
 [assembly: ComVisible(false)]
 [assembly: InternalsVisibleTo("Calculator.Tests")]
+
+// Snapshot aliases remain internal but are also consumed by the app assembly.
+[assembly: InternalsVisibleTo("CalculatorApp")]

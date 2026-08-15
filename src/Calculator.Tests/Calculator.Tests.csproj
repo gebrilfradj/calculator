@@ -86,7 +86,10 @@
     <LangVersion>13.0</LangVersion>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="**\*.cs" Exclude="obj\**\*.cs" />
+    <!-- bin\ must be excluded as well as obj\: the .NET Native toolchain writes generated
+         sources to bin\<platform>\<config>\ilc\, and globbing those back in fails the build
+         with tens of thousands of errors on any build after the first. -->
+    <Compile Include="**\*.cs" Exclude="bin\**\*.cs;obj\**\*.cs" />
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="UnitTestApp.xaml">
@@ -105,6 +108,14 @@
     <Content Include="Assets\Square44x44Logo.png" />
     <Content Include="Assets\Wide310x150Logo.png" />
     <Content Include="Assets\SplashScreen.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <PRIResource Include="..\Calculator\Resources\en-US\Resources.resw">
+      <Link>Resources\en-US\Resources.resw</Link>
+    </PRIResource>
+    <PRIResource Include="..\Calculator\Resources\en-US\CEngineStrings.resw">
+      <Link>Resources\en-US\CEngineStrings.resw</Link>
+    </PRIResource>
   </ItemGroup>
   <PropertyGroup>
     <UnitTestPlatformVersion Condition="'$(UnitTestPlatformVersion)' == ''">18.0</UnitTestPlatformVersion>

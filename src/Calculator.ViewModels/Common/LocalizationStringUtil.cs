@@ -51,8 +51,9 @@ namespace CalculatorApp.ViewModel.Common
                 return string.Empty;
             }
 
-            // Use Win32 FormatMessage with FORMAT_MESSAGE_FROM_STRING to handle %1, %2, etc.
-            // This matches the original C++ behavior that uses FormatMessage.
+            // The localized resources use FormatMessage's %1..%5 placeholders rather than .NET's
+            // {0}..{4}, so the substitution has to go through FormatMessage itself. Managed code
+            // cannot build a va_list, hence ARGUMENT_ARRAY and the marshalled pointer array.
             const uint FORMAT_MESSAGE_FROM_STRING = 0x00000400;
             const uint FORMAT_MESSAGE_ARGUMENT_ARRAY = 0x00002000;
 

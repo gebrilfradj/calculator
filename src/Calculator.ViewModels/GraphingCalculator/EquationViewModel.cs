@@ -85,9 +85,26 @@ namespace CalculatorApp.ViewModel
             _expression = string.Empty;
             _analysisErrorString = string.Empty;
             _keyGraphFeaturesItems = new ObservableCollection<KeyGraphFeaturesItem>();
+            _graphEquation.LineColor = color;
+            _graphEquation.IsLineEnabled = true;
         }
 
         public GraphControl.Equation GraphEquation => _graphEquation;
+
+        partial void OnExpressionChanged(string value)
+        {
+            _graphEquation.Expression = value;
+        }
+
+        partial void OnLineColorChanged(Color value)
+        {
+            _graphEquation.LineColor = value;
+        }
+
+        partial void OnIsLineEnabledChanged(bool value)
+        {
+            _graphEquation.IsLineEnabled = value;
+        }
 
         public int LineColorIndex
         {

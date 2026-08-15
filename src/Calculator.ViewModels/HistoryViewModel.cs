@@ -20,7 +20,7 @@ namespace CalculatorApp.ViewModel
     public sealed partial class HistoryViewModel : ObservableObject, IHistoryDisplayTarget
     {
         private readonly CalculatorManagerWrapper _calculatorManager;
-        private int _currentMode; // CalculatorMode enum value
+        private CalculatorMode _currentMode;
         private string _localizedHistoryCleared;
         private string _localizedHistorySlotCleared;
 
@@ -81,31 +81,34 @@ namespace CalculatorApp.ViewModel
             OnPropertyChanged(nameof(ItemsCount));
         }
 
-        public RelayCommand<object> ClearCommand => new RelayCommand<object>(OnClearCommand);
-        public RelayCommand<object> HideCommand => new RelayCommand<object>(OnHideCommand);
-
-        public void OnHideCommand(object e)
+        [RelayCommand]
+        private void OnHide()
         {
             HideHistoryClicked?.Invoke();
         }
 
-        public void OnClearCommand(object e)
+        [RelayCommand]
+        private void OnClear()
         {
             if (AreHistoryShortcutsEnabled)
             {
                 _calculatorManager?.ClearHistory();
-
-                if (Items.Count > 0)
-                {
-                    Items.Clear();
-                    OnPropertyChanged(nameof(ItemsCount));
-                }
+                ClearItems();
 
                 if (_localizedHistoryCleared == null)
                 {
                     _localizedHistoryCleared = AppResourceProvider.GetInstance().GetResourceString("HistoryList_Cleared");
                 }
                 HistoryAnnouncement = CalculatorAnnouncement.GetHistoryClearedAnnouncement(_localizedHistoryCleared);
+            }
+        }
+
+        internal void ClearItems()
+        {
+            if (Items.Count > 0)
+            {
+                Items.Clear();
+                OnPropertyChanged(nameof(ItemsCount));
             }
         }
 
@@ -143,18 +146,18 @@ namespace CalculatorApp.ViewModel
         {
             if (currentMode == ViewMode.Standard)
             {
-                _currentMode = 0; // CalculatorMode.Standard
+                _currentMode = CalculatorMode.Standard;
             }
             else if (currentMode == ViewMode.Scientific)
             {
-                _currentMode = 1; // CalculatorMode.Scientific
+                _currentMode = CalculatorMode.Scientific;
             }
             else
             {
                 return;
             }
 
-            var historyListModel = _calculatorManager?.GetHistoryItems();
+            var historyListModel = _calculatorManager?.GetHistoryItemsForMode(_currentMode);
             var historyListVM = new ObservableCollection<HistoryItemViewModel>();
             var localizer = LocalizationSettings.GetInstance();
 

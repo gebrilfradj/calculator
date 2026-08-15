@@ -26,7 +26,6 @@ namespace CalculatorApp.ViewModel.Common
 
     /// <summary>
     /// Provides locale-aware settings for number formatting, digit symbols, separators, etc.
-    /// This is the C# port of the C++ LocalizationSettings class.
     /// </summary>
     public sealed class LocalizationSettings
     {

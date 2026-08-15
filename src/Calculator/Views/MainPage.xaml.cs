@@ -181,16 +181,29 @@ namespace CalculatorApp
             else if (e.Parameter is SnapshotLaunchArguments snapshotArgs)
             {
                 ViewModel.Initialize(initialMode);
+                bool restored = false;
                 if (!snapshotArgs.HasError)
                 {
-                    ViewModel.RestoreFromSnapshot(snapshotArgs.Snapshot);
-                    TraceLogger.GetInstance().LogRecallRestore((ViewMode)snapshotArgs.Snapshot.Mode);
+                    try
+                    {
+                        ViewModel.RestoreFromSnapshot(snapshotArgs.Snapshot);
+                        restored = true;
+                        TraceLogger.GetInstance().LogRecallRestore((ViewMode)snapshotArgs.Snapshot.Mode);
+                    }
+                    catch (Exception ex)
+                    {
+                        TraceLogger.GetInstance().LogRecallError($"OnNavigatedTo:Restore failed. {ex.Message}");
+                    }
                 }
-                else
+
+                if (!restored)
                 {
                     _ = Window.Current.Dispatcher.RunAsync(CoreDispatcherPriority.Normal,
                         async () => await ShowSnapshotLaunchErrorAsync());
-                    TraceLogger.GetInstance().LogRecallError("OnNavigatedTo:Found errors.");
+                    if (snapshotArgs.HasError)
+                    {
+                        TraceLogger.GetInstance().LogRecallError("OnNavigatedTo:Found errors.");
+                    }
                 }
             }
             else

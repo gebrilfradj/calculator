@@ -1,7 +1,13 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using System;
+using System.Globalization;
+using System.Linq;
+using System.Threading.Tasks;
+
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Windows.UI.Xaml;
 using CalculatorApp.ViewModel;
 using CalculatorApp.ViewModel.Common;
 
@@ -11,211 +17,551 @@ namespace Calculator.Tests
     public class CategoryViewModelTests
     {
         [TestMethod]
-        [Ignore("Requires native UnitConversionManager types")]
-        public void TestGetNameReturnsCorrectName() { }
+        public void TestGetNameReturnsCorrectName()
+        {
+            var category = new Category(3, "Length", supportsNegative: false);
+
+            Assert.AreEqual("Length", category.Name);
+            Assert.AreEqual(3, category.GetModelCategoryId());
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConversionManager types")]
-        public void TestGetVisibilityReturnsVisible() { }
+        public void TestGetVisibilityReturnsVisible()
+        {
+            var category = new Category(7, "Temperature", supportsNegative: true);
+
+            Assert.AreEqual(Visibility.Visible, category.NegateVisibility);
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConversionManager types")]
-        public void TestGetVisibilityReturnsCollapsed() { }
+        public void TestGetVisibilityReturnsCollapsed()
+        {
+            var category = new Category(3, "Length", supportsNegative: false);
+
+            Assert.AreEqual(Visibility.Collapsed, category.NegateVisibility);
+        }
     }
 
     [TestClass]
     public class UnitViewModelTests
     {
         [TestMethod]
-        [Ignore("Requires native UnitConversionManager types")]
-        public void TestGetNameReturnsCorrectName() { }
+        public void TestGetNameReturnsCorrectName()
+        {
+            var unit = new Unit(11, "Centimeters", "cm", "Centimeters");
+
+            Assert.AreEqual("Centimeters", unit.Name);
+            Assert.AreEqual(11, unit.ModelUnitID());
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConversionManager types")]
-        public void TestGetAbbreviationReturnsCorrectAbbreviation() { }
+        public void TestGetAbbreviationReturnsCorrectAbbreviation()
+        {
+            var unit = new Unit(11, "Centimeters", "cm", "centimeters");
+
+            Assert.AreEqual("cm", unit.Abbreviation);
+            Assert.AreEqual("centimeters", unit.AccessibleName);
+            Assert.AreEqual("centimeters", unit.ToString());
+        }
     }
 
     [TestClass]
     public class SupplementaryResultsViewModelTests
     {
         [TestMethod]
-        [Ignore("Requires native UnitConversionManager types")]
-        public void TestGetValueReturnsCorrectValue() { }
+        public void TestGetValueReturnsCorrectValue()
+        {
+            var result = new SupplementaryResult(
+                "3.5", new Unit(11, "Centimeters", "cm", "centimeters"));
+
+            Assert.AreEqual("3.5", result.Value);
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConversionManager types")]
-        public void TestGetUnitNameReturnsCorrectValue() { }
+        public void TestGetUnitNameReturnsCorrectValue()
+        {
+            var unit = new Unit(11, "Centimeters", "cm", "centimeters");
+            var result = new SupplementaryResult("3.5", unit);
+
+            Assert.AreSame(unit, result.Unit);
+            Assert.AreEqual("3.5 Centimeters", result.GetLocalizedAutomationName());
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConversionManager types")]
-        public void TestGetIsWhimsicalReturnsCorrectValue() { }
+        public void TestGetIsWhimsicalReturnsCorrectValue()
+        {
+            var plain = new SupplementaryResult(
+                "3.5", new Unit(11, "Centimeters", "cm", "centimeters"));
+            var whimsical = new SupplementaryResult(
+                "2", new Unit(90, "Jumbo Jets", "jj", "jumbo jets", isWhimsical: true));
+
+            Assert.IsFalse(plain.IsWhimsical());
+            Assert.IsTrue(whimsical.IsWhimsical());
+        }
     }
 
     [TestClass]
     public class UnitConverterDataLoaderTests
     {
         [TestMethod]
-        [Ignore("Integration test requiring UWP ResourceLoader")]
-        public void FuncUnitConverterAllUnitCombinations() { }
+        public void AllStaticUnitsProduceFiniteConversionsInBothDirections()
+        {
+            var viewModel = new UnitConverterViewModel();
+            int currencyId = NavCategoryStates.Serialize(ViewMode.Currency);
+            int unitsChecked = 0;
+
+            foreach (var category in viewModel.Categories.Where(
+                category => category.GetModelCategoryId() != currencyId))
+            {
+                viewModel.CurrentCategory = category;
+                var units = viewModel.Units.ToList();
+                Assert.IsTrue(units.Count > 0, $"Category '{category.Name}' exposed no units.");
+
+                var reference = units[0];
+                foreach (var unit in units)
+                {
+                    viewModel.Unit1 = unit;
+                    viewModel.Unit2 = reference;
+                    viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Clear);
+                    viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.One);
+
+                    AssertIsRealNumber(viewModel.Value2, category.Name, unit.Name, reference.Name);
+
+                    viewModel.Unit1 = reference;
+                    viewModel.Unit2 = unit;
+                    AssertIsRealNumber(viewModel.Value2, category.Name, reference.Name, unit.Name);
+                    unitsChecked++;
+                }
+            }
+
+            Assert.IsTrue(unitsChecked > 100, $"Only {unitsChecked} units were checked.");
+        }
+
+        private static void AssertIsRealNumber(string displayed, string category, string from, string to)
+        {
+            string location = $"{category}: {from} -> {to} displayed '{displayed}'";
+            Assert.IsFalse(string.IsNullOrWhiteSpace(displayed), $"{location} (empty)");
+
+            var settings = LocalizationSettings.GetInstance();
+            string bare = displayed
+                .Replace(settings.GetNumberGroupingSeparatorStr(), string.Empty)
+                .Replace("\u00A0", string.Empty)
+                .Replace(settings.GetDecimalSeparatorStr(), ".");
+
+            Assert.IsTrue(
+                double.TryParse(
+                    bare,
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out double value),
+                $"{location} (not a number)");
+            Assert.IsFalse(double.IsNaN(value) || double.IsInfinity(value), $"{location} (not finite)");
+        }
     }
 
     [TestClass]
     public class UnitConverterViewModelTests
     {
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestUnitConverterCtorSetsUpCorrectActiveValue() { }
+        public void EnteringValueAfterSwitchingActiveUpdatesSecondValue()
+        {
+            var viewModel = new UnitConverterViewModel();
+            viewModel.SwitchActiveCommand.Execute(null);
+
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Seven);
+
+            Assert.AreEqual("7", viewModel.Value2);
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestUnitConverterCtorSetsUpVectors() { }
+        public void MaxDigitsAnnouncementIncludesTheConversionResult()
+        {
+            var viewModel = new UnitConverterViewModel();
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Five);
+            viewModel.OnMaxDigitsReached();
+
+            var announcement = viewModel.Announcement?.Announcement;
+
+            Assert.IsFalse(string.IsNullOrEmpty(announcement));
+            Assert.IsFalse(
+                announcement.Contains("%1"),
+                $"The format placeholder was never substituted: '{announcement}'.");
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestUnitConverterLoadSetsUpCallbacks() { }
+        public void SwitchingActiveValueSwapsTheFromAndToAutomationFormats()
+        {
+            var viewModel = new UnitConverterViewModel();
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Five);
+
+            var value1NameBefore = viewModel.Value1AutomationName;
+            var value2NameBefore = viewModel.Value2AutomationName;
+
+            viewModel.SwitchActiveCommand.Execute(null);
+            viewModel.UpdateValue1AutomationName();
+            viewModel.UpdateValue2AutomationName();
+
+            Assert.AreNotEqual(
+                StripDigits(value1NameBefore),
+                StripDigits(viewModel.Value1AutomationName));
+            Assert.AreNotEqual(
+                StripDigits(value2NameBefore),
+                StripDigits(viewModel.Value2AutomationName));
+        }
+
+        private static string StripDigits(string value)
+        {
+            return value == null ? null : new string(value.Where(c => !char.IsDigit(c)).ToArray());
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestUnitConverterLoadSetsUpCategories() { }
+        public void PastingAMinusAfterDigitsDoesNotNegateTheValue()
+        {
+            var viewModel = new UnitConverterViewModel();
+            SelectNegatableCategory(viewModel);
+
+            viewModel.OnPaste("5-3");
+
+            Assert.AreEqual("53", viewModel.Value1);
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestUnitConverterLoadSetsUpUnits() { }
+        public void PastingALeadingMinusNegatesTheValue()
+        {
+            var viewModel = new UnitConverterViewModel();
+            SelectNegatableCategory(viewModel);
+
+            viewModel.OnPaste("-53");
+
+            Assert.AreEqual("-53", viewModel.Value1);
+        }
+
+        private static void SelectNegatableCategory(UnitConverterViewModel viewModel)
+        {
+            viewModel.CurrentCategory = viewModel.Categories.First(
+                category => category.NegateVisibility == Visibility.Visible);
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestUnitSelectionChangeUpdatesModel() { }
+        public void TextWithNoUsableNumberIsRejectedBeforeItReachesTheConverter()
+        {
+            foreach (string candidate in new[] { "-", "-abc", ".", "abc" })
+            {
+                Assert.AreEqual(
+                    "NoOp",
+                    CopyPasteManager.ValidatePasteExpression(
+                        candidate,
+                        ViewMode.Length,
+                        CategoryGroupType.Converter,
+                        NumberBase.Unknown,
+                        BitLength.BitLengthUnknown),
+                    $"'{candidate}' should be rejected as a paste for a converter.");
+            }
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestCategorySelectionChangeUpdatesUnits() { }
+        public void PartialDisplayValuesDoNotThrowDuringFormatting()
+        {
+            var viewModel = new UnitConverterViewModel();
+
+            viewModel.UpdateDisplay("-", ".");
+
+            Assert.AreEqual("-", viewModel.Value1);
+            Assert.AreEqual(".", viewModel.Value2);
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestCategorySelectionChangeUpdatesModel() { }
+        public void RejectedPasteSaysWhyInsteadOfBlankingTheDisplay()
+        {
+            var viewModel = new UnitConverterViewModel();
+            SelectNegatableCategory(viewModel);
+            viewModel.OnPaste("53");
+            Assert.AreEqual("53", viewModel.Value1);
+
+            viewModel.OnPaste("NoOp");
+
+            Assert.IsFalse(string.IsNullOrEmpty(viewModel.Value1));
+            Assert.AreEqual(viewModel.Value1, viewModel.Value2);
+            Assert.AreNotEqual("53", viewModel.Value1);
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestDisplayCallbackUpdatesDisplayValues() { }
+        public void LargeValuesAreDisplayedWithGroupSeparators()
+        {
+            var viewModel = new UnitConverterViewModel();
+            foreach (var digit in new[]
+            {
+                NumbersAndOperatorsEnum.One,
+                NumbersAndOperatorsEnum.Two,
+                NumbersAndOperatorsEnum.Three,
+                NumbersAndOperatorsEnum.Four,
+                NumbersAndOperatorsEnum.Five,
+                NumbersAndOperatorsEnum.Six,
+                NumbersAndOperatorsEnum.Seven
+            })
+            {
+                viewModel.ButtonPressedCommand.Execute(digit);
+            }
+
+            var separator = LocalizationSettings.GetInstance().GetNumberGroupingSeparatorStr();
+
+            StringAssert.Contains(viewModel.Value1, separator);
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestButtonCommandFiresModelCommands() { }
+        public void LengthSuggestionsPreserveWhimsicalUnitMetadata()
+        {
+            var viewModel = CreateLengthViewModel();
+            var resources = AppResourceProvider.GetInstance();
+            Unit centimeters = viewModel.Units.Single(
+                unit => unit.Name == resources.GetResourceString("UnitName_Centimeter"));
+            Unit inches = viewModel.Units.Single(
+                unit => unit.Name == resources.GetResourceString("UnitName_Inch"));
+            SelectUnit(viewModel, centimeters, isFromUnit: true);
+            SelectUnit(viewModel, inches, isFromUnit: false);
+
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Clear);
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Four);
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Seven);
+
+            SupplementaryResult result = viewModel.SupplementaryResults.Last();
+            Assert.AreEqual(resources.GetResourceString("UnitName_Hand"), result.Unit.Name);
+            Assert.AreEqual(
+                resources.GetResourceString("UnitAbbreviation_Hand"),
+                result.Unit.Abbreviation);
+            Assert.IsTrue(result.IsWhimsical());
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestOnValueGotFocusActivatesControl() { }
+        public async Task EnteringDigitAfterCurrencyUnitChangeReplacesValue()
+        {
+            var viewModel = new UnitConverterViewModel();
+            int currencyId = NavCategoryStates.Serialize(ViewMode.Currency);
+            viewModel.CurrentCategory = viewModel.Categories.Single(
+                category => category.GetModelCategoryId() == currencyId);
+            await WaitForCurrencyUnitsAsync(viewModel);
+
+            viewModel.OnPaste("1.23");
+            Unit replacement = viewModel.Units.First(
+                unit => unit.ModelUnitID() != viewModel.Unit1.ModelUnitID());
+            SelectUnit(viewModel, replacement, isFromUnit: true);
+
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Seven);
+
+            Assert.AreEqual("7", viewModel.Value1);
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestReselectCurrentlyActiveValueDoesNothing() { }
+        public async Task EnteringCurrencyAfterBackgroundLoadUsesLoadedRatios()
+        {
+            var viewModel = new UnitConverterViewModel();
+            Assert.IsFalse(viewModel.IsCurrencyCurrentCategory);
+
+            await WaitForCurrencyLoadAsync(viewModel);
+
+            int currencyId = NavCategoryStates.Serialize(ViewMode.Currency);
+            viewModel.CurrentCategory = viewModel.Categories.Single(
+                category => category.GetModelCategoryId() == currencyId);
+            await WaitForCurrencyUnitsAsync(viewModel);
+
+            Unit mars = viewModel.Units.First(unit => unit.Abbreviation == "MAR");
+            Unit moon = viewModel.Units.First(unit => unit.Abbreviation == "MON");
+            SelectUnit(viewModel, mars, isFromUnit: true);
+            SelectUnit(viewModel, moon, isFromUnit: false);
+
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.One);
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Zero);
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Zero);
+
+            Assert.AreEqual("100", viewModel.Value1);
+            Assert.AreEqual("50", viewModel.Value2);
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestActivatingValueDeactivatesOther() { }
+        public async Task CurrencyLoadFinishingInsideCurrencyUsesLoadedRatios()
+        {
+            var viewModel = new UnitConverterViewModel();
+            int currencyId = NavCategoryStates.Serialize(ViewMode.Currency);
+            viewModel.CurrentCategory = viewModel.Categories.Single(
+                category => category.GetModelCategoryId() == currencyId);
+            Assert.IsFalse(viewModel.IsCurrencyDataLoaded);
+
+            await WaitForCurrencyUnitsAsync(viewModel);
+
+            Unit mars = viewModel.Units.First(unit => unit.Abbreviation == "MAR");
+            Unit moon = viewModel.Units.First(unit => unit.Abbreviation == "MON");
+            SelectUnit(viewModel, mars, isFromUnit: true);
+            SelectUnit(viewModel, moon, isFromUnit: false);
+
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.One);
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Zero);
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Zero);
+
+            Assert.AreEqual("100", viewModel.Value1);
+            Assert.AreEqual("50", viewModel.Value2);
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestSwitchActiveValueUpdatesActiveValueInModel() { }
+        public async Task LeavingCurrencyClearsTheCurrencySymbolsAndRatio()
+        {
+            var viewModel = new UnitConverterViewModel();
+            int currencyId = NavCategoryStates.Serialize(ViewMode.Currency);
+            viewModel.CurrentCategory = viewModel.Categories.Single(
+                category => category.GetModelCategoryId() == currencyId);
+            await WaitForCurrencyUnitsAsync(viewModel);
+
+            Assert.IsFalse(string.IsNullOrEmpty(viewModel.CurrencySymbol1));
+
+            int lengthId = NavCategoryStates.Serialize(ViewMode.Length);
+            viewModel.CurrentCategory = viewModel.Categories.Single(
+                category => category.GetModelCategoryId() == lengthId);
+
+            Assert.AreEqual(string.Empty, viewModel.CurrencySymbol1);
+            Assert.AreEqual(string.Empty, viewModel.CurrencySymbol2);
+            Assert.AreEqual(Visibility.Collapsed, viewModel.CurrencySymbolVisibility);
+            Assert.AreEqual(string.Empty, viewModel.CurrencyRatioEquality);
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestSuggestedVisibilityIsUpdated() { }
+        public void ConverterCommandsKeepTheirIdentityAcrossReads()
+        {
+            var viewModel = new UnitConverterViewModel();
+
+            Assert.AreSame(viewModel.CategoryChangedCommand, viewModel.CategoryChangedCommand);
+            Assert.AreSame(viewModel.UnitChangedCommand, viewModel.UnitChangedCommand);
+            Assert.AreSame(viewModel.SwitchActiveCommand, viewModel.SwitchActiveCommand);
+            Assert.AreSame(viewModel.ButtonPressedCommand, viewModel.ButtonPressedCommand);
+            Assert.AreSame(viewModel.CopyCommand, viewModel.CopyCommand);
+            Assert.AreSame(viewModel.PasteCommand, viewModel.PasteCommand);
+            Assert.AreSame(viewModel.ButtonPressedCommand, viewModel.ButtonPressed);
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestDisplayValueUpdatesAfterSwitchingActiveUpdateTheRightDisplay() { }
+        public void OtherViewModelCommandsKeepTheirIdentityAcrossReads()
+        {
+            var standard = new StandardCalculatorViewModel();
+            HistoryViewModel history = standard.HistoryVM;
+            Assert.AreSame(history.ClearCommand, history.ClearCommand);
+            Assert.AreSame(history.HideCommand, history.HideCommand);
+
+            var dateCalculator = new DateCalculatorViewModel();
+            Assert.AreSame(dateCalculator.CopyCommand, dateCalculator.CopyCommand);
+
+            var application = new ApplicationViewModel();
+            Assert.AreSame(application.CopyCommand, application.CopyCommand);
+            Assert.AreSame(application.PasteCommand, application.PasteCommand);
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestUnitChangeAfterSwitchingActiveUpdateUnitsCorrectly() { }
+        public void ConstructionAndCategorySwitchingKeepTheConverterConsistent()
+        {
+            var viewModel = new UnitConverterViewModel();
+
+            Assert.IsTrue(viewModel.Categories.Count > 0);
+            Assert.IsTrue(viewModel.Units.Count > 0);
+            Assert.IsNotNull(viewModel.CurrentCategory);
+            Assert.IsNotNull(viewModel.Unit1);
+            Assert.IsNotNull(viewModel.Unit2);
+            Assert.IsTrue(viewModel.Value1Active ^ viewModel.Value2Active);
+
+            var original = viewModel.CurrentCategory;
+            var originalUnits = viewModel.Units.Select(unit => unit.ModelUnitID()).ToList();
+            var other = viewModel.Categories.First(
+                category => category.GetModelCategoryId() != original.GetModelCategoryId());
+
+            viewModel.CurrentCategory = other;
+            CollectionAssert.AreNotEqual(
+                originalUnits,
+                viewModel.Units.Select(unit => unit.ModelUnitID()).ToList());
+            Assert.IsTrue(viewModel.Units.Contains(viewModel.Unit1));
+            Assert.IsTrue(viewModel.Units.Contains(viewModel.Unit2));
+
+            viewModel.CurrentCategory = original;
+            CollectionAssert.AreEqual(
+                originalUnits,
+                viewModel.Units.Select(unit => unit.ModelUnitID()).ToList());
+        }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestCategorySwitchAndBackKeepsUnitsUnchanged() { }
+        public void InputFollowsTheActiveValueAndIsFormattedForDisplay()
+        {
+            var viewModel = new UnitConverterViewModel();
+            var separator = LocalizationSettings.GetInstance().GetDecimalSeparatorStr();
+            bool firstWasActive = viewModel.Value1Active;
 
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestCategoryAndActiveSwitchAndBack() { }
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.One);
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Decimal);
+            StringAssert.EndsWith(viewModel.Value1, separator);
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Five);
+            Assert.AreEqual($"1{separator}5", viewModel.Value1);
 
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestCategoryChangeAfterSwitchingActiveUpdatesDisplayCorrectly() { }
+            viewModel.SwitchActiveCommand.Execute(null);
+            Assert.AreNotEqual(firstWasActive, viewModel.Value1Active);
+            Assert.IsTrue(viewModel.Value1Active ^ viewModel.Value2Active);
 
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestSwitchAndReselectCurrentlyActiveValueDoesNothing() { }
+            viewModel.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Eight);
+            Assert.AreEqual("8", viewModel.Value2);
 
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestSwitchActiveValueTwiceUpdatesActiveValueInModel() { }
+            viewModel.SwitchActiveCommand.Execute(null);
+            Assert.AreEqual(firstWasActive, viewModel.Value1Active);
+            Assert.IsTrue(viewModel.Value1Active ^ viewModel.Value2Active);
 
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestDisplayValueUpdatesAfterSwitchingActiveTwiceUpdateTheRightDisplay() { }
+            viewModel.UpdateValue1AutomationName();
+            Assert.IsFalse(string.IsNullOrEmpty(viewModel.Value1AutomationName));
+            StringAssert.Contains(viewModel.Value1AutomationName, viewModel.Unit1.AccessibleName);
+        }
 
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestUnitChangeAfterSwitchingActiveTwiceUpdateUnitsCorrectly() { }
+        private static async Task WaitForCurrencyLoadAsync(UnitConverterViewModel viewModel)
+        {
+            for (int attempt = 0; attempt < 250; attempt++)
+            {
+                if (viewModel.IsCurrencyDataLoaded)
+                {
+                    return;
+                }
 
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestCategoryChangeAfterSwitchingActiveTwiceUpdatesDisplayCorrectly() { }
+                await Task.Delay(20);
+            }
 
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestSuggestedValuesCallbackUpdatesSupplementaryResults() { }
+            Assert.Fail("The background currency load did not finish.");
+        }
 
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestCategoryChangeImmediatelyUpdatesSupplementaryResults() { }
+        private static async Task WaitForCurrencyUnitsAsync(UnitConverterViewModel viewModel)
+        {
+            await WaitForCurrencyLoadAsync(viewModel);
 
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestCategoryChangeImmediatelyUpdatesSupplementaryResultsWhimsy() { }
+            for (int attempt = 0; attempt < 100; attempt++)
+            {
+                if (viewModel.Units.Count > 1 && viewModel.Units[0].ModelUnitID() != -1)
+                {
+                    return;
+                }
 
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestUnitChangeImmediatelyUpdatesSupplementaryResults() { }
+                await Task.Delay(20);
+            }
 
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestSupplementaryResultsWhimsicalUnits() { }
+            Assert.Fail("Currency units did not load.");
+        }
 
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestOnPaste() { }
+        private static UnitConverterViewModel CreateLengthViewModel()
+        {
+            var viewModel = new UnitConverterViewModel();
+            int lengthId = NavCategoryStates.Serialize(ViewMode.Length);
+            viewModel.CurrentCategory = viewModel.Categories.Single(
+                category => category.GetModelCategoryId() == lengthId);
+            return viewModel;
+        }
 
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestDecimalFormattingLogic() { }
-
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestCurrencyFormattingLogic() { }
-
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestValue1AndValue2AutomationNameChanges() { }
-
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestUnitsListBuildsFromEmptyModelUnitList() { }
-
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestUnitsListBuildsFromValidModelUnitList() { }
-
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestFindInListWhenListIsValid() { }
-
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestFindInListWhenListIsInvalid() { }
-
-        [TestMethod]
-        [Ignore("Requires native UnitConverterMock not available in C# tests")]
-        public void TestSetSelectedUnits() { }
+        private static void SelectUnit(UnitConverterViewModel viewModel, Unit unit, bool isFromUnit)
+        {
+            if (isFromUnit)
+            {
+                viewModel.Unit1 = unit;
+            }
+            else
+            {
+                viewModel.Unit2 = unit;
+            }
+        }
     }
 }

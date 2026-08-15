@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using System;
+using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using CalculatorApp.ViewModel;
 using CalculatorApp.ViewModel.Common;
@@ -654,41 +656,94 @@ namespace Calculator.Tests
         }
 
         [TestMethod]
-        [Ignore("TODO - MSFT 10331900")]
-        public void MultipleDateCalculatorTest()
+        public void DateCalculatorInstancesKeepIndependentState()
         {
-            // This test is commented out in the C++ source due to incorrect expected values
-            // in UTC- time zones. The test creates 4 DateCalculatorViewModel instances,
-            // sets up date diff and add/subtract modes, performs calculations, and verifies results.
+            var first = new DateCalculatorViewModel { IsDateDiffMode = true };
+            var second = new DateCalculatorViewModel { IsDateDiffMode = true };
+            var third = new DateCalculatorViewModel();
+
+            first.FromDate = new DateTimeOffset(2008, 1, 31, 0, 0, 0, TimeSpan.Zero);
+            first.ToDate = new DateTimeOffset(2008, 3, 31, 0, 0, 0, TimeSpan.Zero);
+
+            second.FromDate = new DateTimeOffset(2007, 2, 28, 0, 0, 0, TimeSpan.Zero);
+            second.ToDate = new DateTimeOffset(2007, 3, 10, 0, 0, 0, TimeSpan.Zero);
+
+            third.IsDateDiffMode = false;
+            third.IsAddMode = true;
+            third.StartDate = new DateTimeOffset(2008, 1, 31, 0, 0, 0, TimeSpan.Zero);
+            third.DaysOffset = 1;
+
+            Assert.AreNotEqual(first.StrDateDiffResult, second.StrDateDiffResult,
+                "Two date calculators shared a result.");
+            Assert.IsFalse(string.IsNullOrEmpty(third.StrDateResult));
+            Assert.IsTrue(first.IsDateDiffMode, "One date calculator's mode changed another's.");
         }
 
         [TestMethod]
-        [Ignore("Requires native UnitConverterMock")]
-        public void InitializeMultipleConverterTest()
+        public void ConverterInstancesKeepIndependentState()
         {
-            // Creates 3 UnitConverterViewModel instances with UnitConverterMock,
-            // verifies categories, changes categories on instances 0 and 2,
-            // and asserts that category, unit1, and unit2 are set independently.
+            var converters = new[]
+            {
+                new UnitConverterViewModel(),
+                new UnitConverterViewModel(),
+                new UnitConverterViewModel(),
+            };
+
+            foreach (var converter in converters)
+            {
+                Assert.IsTrue(converter.Categories.Count > 0);
+                Assert.IsNotNull(converter.Unit1);
+                Assert.IsNotNull(converter.Unit2);
+            }
+
+            var other = converters[0].Categories.First(
+                category => category.GetModelCategoryId() != converters[0].CurrentCategory.GetModelCategoryId());
+            converters[0].CurrentCategory = other;
+            converters[2].CurrentCategory = other;
+
+            Assert.AreEqual(other.GetModelCategoryId(), converters[0].CurrentCategory.GetModelCategoryId());
+            Assert.AreEqual(other.GetModelCategoryId(), converters[2].CurrentCategory.GetModelCategoryId());
+            Assert.AreNotEqual(
+                other.GetModelCategoryId(),
+                converters[1].CurrentCategory.GetModelCategoryId(),
+                "Changing one converter's category changed another's.");
+
+            converters[0].ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.One);
+            converters[1].ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Two);
+            converters[2].ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Three);
+
+            Assert.AreEqual("1", converters[0].Value1);
+            Assert.AreEqual("2", converters[1].Value1);
+            Assert.AreEqual("3", converters[2].Value1);
         }
 
         [TestMethod]
-        [Ignore("Requires UWP ResourceLoader")]
-        public void MultipleConverterModeCalculationTest()
+        public void CalculatorModeViewModelsKeepIndependentState()
         {
-            // Creates 3 UnitConverterViewModel instances with UnitConverterDataLoader,
-            // sets categories (Volume, Volume, Length) and units,
-            // performs button presses (1, 2, 3), and validates conversion results
-            // using resource strings.
-        }
+            var standard = new StandardCalculatorViewModel { IsStandard = true };
+            var converter = new UnitConverterViewModel();
+            var dateCalc = new DateCalculatorViewModel { IsDateDiffMode = false, IsAddMode = true };
 
-        [TestMethod]
-        [Ignore("Requires UWP ResourceLoader")]
-        public void TestStandardUnitConverterAndDateViewModels()
-        {
-            // Creates StandardCalculatorViewModel, UnitConverterViewModel, and DateCalculatorViewModel.
-            // Performs 3-2=1 on Standard, sets date offset on DateCalc, presses 2 on converter.
-            // Validates converter shows 2 -> 0.002, Standard stays at 1.
-            // Then performs 1+2=3 on Standard and validates all instances remain independent.
+            standard.ButtonPressed.Execute(NumbersAndOperatorsEnum.Three);
+            standard.ButtonPressed.Execute(NumbersAndOperatorsEnum.Subtract);
+            standard.ButtonPressed.Execute(NumbersAndOperatorsEnum.Two);
+            standard.ButtonPressed.Execute(NumbersAndOperatorsEnum.Equals);
+            Assert.AreEqual("1", standard.DisplayValue);
+
+            dateCalc.DaysOffset = 1;
+            converter.ButtonPressedCommand.Execute(NumbersAndOperatorsEnum.Two);
+
+            Assert.AreEqual("2", converter.Value1);
+            Assert.AreEqual("1", standard.DisplayValue, "The converter disturbed the standard calculator.");
+            Assert.IsFalse(string.IsNullOrEmpty(dateCalc.StrDateResult));
+
+            standard.ButtonPressed.Execute(NumbersAndOperatorsEnum.One);
+            standard.ButtonPressed.Execute(NumbersAndOperatorsEnum.Add);
+            standard.ButtonPressed.Execute(NumbersAndOperatorsEnum.Two);
+            standard.ButtonPressed.Execute(NumbersAndOperatorsEnum.Equals);
+
+            Assert.AreEqual("3", standard.DisplayValue);
+            Assert.AreEqual("2", converter.Value1, "The standard calculator disturbed the converter.");
         }
 
         [TestMethod]

@@ -105,6 +105,8 @@ namespace winrt::CalcManager::Interop::implementation
         char16_t DecimalSeparator();
 
         com_array<CalcManager::Interop::HistoryItemWrapper> GetHistoryItems();
+        com_array<CalcManager::Interop::HistoryItemWrapper> GetHistoryItemsForMode(CalcManager::Interop::CalculatorMode mode);
+        void SetHistoryItems(array_view<CalcManager::Interop::HistoryItemWrapper const> historyItems);
         CalcManager::Interop::HistoryItemWrapper GetHistoryItem(uint32_t index);
         bool RemoveHistoryItem(uint32_t index);
         void ClearHistory();

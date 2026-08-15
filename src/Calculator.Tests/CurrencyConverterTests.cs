@@ -1,9 +1,15 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using System;
+using System.Globalization;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using CalculatorApp.ViewModel;
 using CalculatorApp.ViewModel.Common;
+using CalculatorApp.ViewModel.DataLoaders;
+using Windows.Storage;
 
 namespace Calculator.Tests
 {
@@ -11,161 +17,372 @@ namespace Calculator.Tests
     public class CurrencyConverterLoadTests
     {
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void LoadFromCache_Fail_NoCacheKey()
+        public async Task LoadFromCache_Fail_NoCacheKey()
         {
-            // Removes CacheTimestampKey from local settings, creates CurrencyDataLoader with "en-US",
-            // calls TryLoadDataFromCacheAsync, and verifies it returns false.
-            // Asserts LoadFinished and LoadedFromCache are both false.
+            var localSettings = ApplicationData.Current.LocalSettings;
+            localSettings.Values.Remove(CurrencyDataLoaderConstants.CacheTimestampKey);
+
+            var loader = new CurrencyDataLoader("en-US");
+            bool didLoad = await loader.TryLoadDataFromCacheAsync();
+
+            Assert.IsFalse(didLoad, "Loading from cache must fail when the cache timestamp key is absent");
+            Assert.IsFalse(loader.LoadFinished());
+            Assert.IsFalse(loader.LoadedFromCache());
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void LoadFromCache_Fail_OlderThanADay()
+        public async Task InitialLoadAndRefreshSerializeCurrencyMutation()
         {
-            // Inserts a timestamp older than 24 hours into local settings,
-            // forces web failure, creates CurrencyDataLoader with "en-US",
-            // calls TryLoadDataFromCacheAsync, and verifies it returns false.
-            // Asserts LoadFinished and LoadedFromCache are both false.
+            var firstEntry = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseFirstEntry = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var initialLoadFinished = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            int entryCount = 0;
+            int activeEntries = 0;
+            int overlapDetected = 0;
+
+            var loader = new CurrencyDataLoader("en-US");
+            loader.LoadGateEnteredForTest = async () =>
+            {
+                if (Interlocked.Increment(ref activeEntries) > 1)
+                {
+                    Interlocked.Exchange(ref overlapDetected, 1);
+                }
+
+                int entry = Interlocked.Increment(ref entryCount);
+                if (entry == 1)
+                {
+                    firstEntry.SetResult(true);
+                    await releaseFirstEntry.Task;
+                }
+            };
+            loader.LoadGateExitedForTest = () => Interlocked.Decrement(ref activeEntries);
+            loader.SetViewModelCallback(new LoadCompletionCallback(initialLoadFinished));
+
+            loader.LoadData();
+            await firstEntry.Task;
+            Task<bool> refresh = loader.TryLoadDataFromWebOverrideAsync();
+            releaseFirstEntry.SetResult(true);
+
+            await initialLoadFinished.Task;
+            await refresh;
+
+            Assert.AreEqual(0, overlapDetected);
+            Assert.AreEqual(2, entryCount);
+        }
+
+        private static async Task<DateTimeOffset> PrimeCacheAsync(
+            string languageCode = "en-US",
+            DateTimeOffset? timestamp = null,
+            bool writeStaticData = true,
+            bool writeRatios = true,
+            string staticDataOverride = null,
+            string ratiosOverride = null)
+        {
+            var stamp = timestamp ?? DateTimeOffset.UtcNow;
+            var localSettings = ApplicationData.Current.LocalSettings;
+            localSettings.Values[CurrencyDataLoaderConstants.CacheTimestampKey] = stamp;
+            localSettings.Values[CurrencyDataLoaderConstants.CacheLangcodeKey] = languageCode;
+
+            var folder = ApplicationData.Current.LocalCacheFolder;
+            var staticData = staticDataOverride ?? await new CurrencyHttpClient().GetCurrencyMetadataAsync();
+            var ratios = ratiosOverride ?? await new CurrencyHttpClient().GetCurrencyRatiosAsync();
+
+            await WriteOrDeleteAsync(folder, CurrencyDataLoaderConstants.StaticDataFilename, writeStaticData ? staticData : null);
+            await WriteOrDeleteAsync(folder, CurrencyDataLoaderConstants.AllRatiosDataFilename, writeRatios ? ratios : null);
+
+            return stamp;
+        }
+
+        private static async Task WriteOrDeleteAsync(StorageFolder folder, string name, string contents)
+        {
+            if (contents == null)
+            {
+                var existing = await folder.TryGetItemAsync(name);
+                if (existing != null)
+                {
+                    await existing.DeleteAsync();
+                }
+                return;
+            }
+
+            var file = await folder.CreateFileAsync(name, CreationCollisionOption.ReplaceExisting);
+            await FileIO.WriteTextAsync(file, contents);
+        }
+
+        private static async Task<CurrencyDataLoader> LoadedLoaderAsync()
+        {
+            await PrimeCacheAsync();
+            var loader = new CurrencyDataLoader("en-US");
+            bool didLoad = await loader.TryLoadDataFromCacheAsync();
+            Assert.IsTrue(didLoad, "Cache load failed while setting up the test.");
+            return loader;
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void LoadFromCache_Fail_StaticDataFileDoesNotExist()
+        public async Task LoadFromCache_Success()
         {
-            // Inserts current timestamp, deletes static data file, writes all-ratios file,
-            // creates CurrencyDataLoader with "en-US", calls TryLoadDataFromCacheAsync.
-            // Verifies it returns false. Asserts LoadFinished and LoadedFromCache are both false.
+            await PrimeCacheAsync();
+
+            var loader = new CurrencyDataLoader("en-US");
+            bool didLoad = await loader.TryLoadDataFromCacheAsync();
+
+            Assert.IsTrue(didLoad);
+            Assert.IsTrue(loader.LoadFinished());
+            Assert.IsTrue(loader.LoadedFromCache());
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void LoadFromCache_Fail_AllRatiosDataFileDoesNotExist()
+        public async Task LoadFromCache_Fail_StaticDataFileDoesNotExist()
         {
-            // Inserts current timestamp, writes static data file, deletes all-ratios file,
-            // creates CurrencyDataLoader with "en-US", calls TryLoadDataFromCacheAsync.
-            // Verifies it returns false. Asserts LoadFinished and LoadedFromCache are both false.
+            await PrimeCacheAsync(writeStaticData: false);
+
+            var loader = new CurrencyDataLoader("en-US");
+            bool didLoad = await loader.TryLoadDataFromCacheAsync();
+
+            Assert.IsFalse(didLoad, "A cache load with no static data file must fail.");
+            Assert.IsFalse(loader.LoadedFromCache());
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void LoadFromCache_Fail_ResponseLanguageChanged()
+        public async Task LoadFromCache_Fail_AllRatiosDataFileDoesNotExist()
         {
-            // Inserts current timestamp and a different language code ("ar-SA"),
-            // writes static data file, deletes all-ratios file,
-            // creates CurrencyDataLoader with "en-US", calls TryLoadDataFromCacheAsync.
-            // Verifies it returns false. Asserts LoadFinished and LoadedFromCache are both false.
+            await PrimeCacheAsync(writeRatios: false);
+
+            var loader = new CurrencyDataLoader("en-US");
+            bool didLoad = await loader.TryLoadDataFromCacheAsync();
+
+            Assert.IsFalse(didLoad, "A cache load with no ratios file must fail.");
+            Assert.IsFalse(loader.LoadedFromCache());
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void LoadFromCache_Success()
+        public async Task LoadFromCache_Fail_ResponseLanguageChanged()
         {
-            // Performs standard cache setup (current timestamp, en-US language, writes both files),
-            // creates CurrencyDataLoader with "en-US", calls TryLoadDataFromCacheAsync.
-            // Verifies it returns true. Asserts LoadFinished and LoadedFromCache are both true.
+            // The cached text is localized, so a cache written for another language cannot be used.
+            await PrimeCacheAsync(languageCode: "ar-SA");
+
+            var loader = new CurrencyDataLoader("en-US");
+            bool didLoad = await loader.TryLoadDataFromCacheAsync();
+
+            Assert.IsFalse(didLoad, "A cache written for a different language must not be reused.");
+            Assert.IsFalse(loader.LoadedFromCache());
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void LoadFromWeb_Fail_WebException()
+        public async Task LoadFromCache_SortsCurrenciesByCountryName()
         {
-            // Forces web failure on CurrencyHttpClient, creates CurrencyDataLoader with "en-US",
-            // calls TryLoadDataFromWebAsync. Verifies it returns false.
-            // Asserts LoadFinished and LoadedFromWeb are both false.
+            const string staticData = @"[
+                {""CountryCode"":""AA"",""CountryName"":""Zebra"",""CurrencyCode"":""AAA"",""CurrencyName"":""Alpha Coin"",""CurrencySymbol"":""A""},
+                {""CountryCode"":""ZZ"",""CountryName"":""Alpha"",""CurrencyCode"":""ZZZ"",""CurrencyName"":""Zulu Coin"",""CurrencySymbol"":""Z""},
+                {""CountryCode"":""MM"",""CountryName"":""Éclair"",""CurrencyCode"":""MMM"",""CurrencyName"":""Mike Coin"",""CurrencySymbol"":""M""}
+            ]";
+            const string ratios = @"[
+                {""Rt"":1.0,""An"":""AAA""},
+                {""Rt"":2.0,""An"":""ZZZ""},
+                {""Rt"":3.0,""An"":""MMM""}
+            ]";
+
+            var originalCulture = CultureInfo.CurrentCulture;
+            try
+            {
+                CultureInfo.CurrentCulture = new CultureInfo("en-US");
+                await PrimeCacheAsync(staticDataOverride: staticData, ratiosOverride: ratios);
+                var loader = new CurrencyDataLoader("en-US");
+
+                Assert.IsTrue(await loader.TryLoadDataFromCacheAsync());
+
+                CollectionAssert.AreEqual(
+                    new[] { "Alpha", "Éclair", "Zebra" },
+                    loader.GetOrderedUnits(0).ConvertAll(unit => unit.CountryName));
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = originalCulture;
+                await PrimeCacheAsync();
+            }
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void LoadFromWeb_Success()
+        public async Task Loaded_LoadOrderedUnits()
         {
-            // Creates CurrencyDataLoader with "en-US", calls TryLoadDataFromWebAsync.
-            // Verifies it returns true. Asserts LoadFinished and LoadedFromWeb are both true.
+            var loader = await LoadedLoaderAsync();
+
+            var units = loader.GetOrderedUnits(0);
+
+            Assert.IsTrue(units.Count > 0, "No currency units were loaded.");
+            foreach (var unit in units)
+            {
+                Assert.IsFalse(string.IsNullOrEmpty(unit.Abbreviation), "A currency unit had no abbreviation.");
+                Assert.IsFalse(string.IsNullOrEmpty(unit.CountryName), "A currency unit had no country name.");
+            }
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void Load_Success_LoadedFromCache()
+        public async Task Loaded_LoadOrderedRatios()
         {
-            // Performs standard cache setup, creates CurrencyDataLoader with "en-US",
-            // sets callback, calls LoadData and waits for completion.
-            // Asserts LoadFinished is true, LoadedFromCache is true, LoadedFromWeb is false.
+            var loader = await LoadedLoaderAsync();
+            var units = loader.GetOrderedUnits(0);
+
+            var ratios = loader.LoadOrderedRatios(units[0].Id);
+
+            Assert.IsTrue(ratios.Count > 0, "The first currency unit had no ratios.");
+            Assert.IsTrue(
+                ratios.ContainsKey(units[0].Id),
+                "A currency should always convert to itself.");
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void Load_Success_LoadedFromWeb()
+        public async Task Loaded_GetCurrencySymbols_Valid()
         {
-            // Inserts a stale timestamp (24+ hours old), creates CurrencyDataLoader with "en-US",
-            // sets callback, calls LoadData and waits for completion.
-            // Asserts LoadFinished is true, LoadedFromCache is false, LoadedFromWeb is true.
-        }
-    }
+            var loader = await LoadedLoaderAsync();
+            var units = loader.GetOrderedUnits(0);
 
-    [TestClass]
-    public class CurrencyConverterUnitTests
-    {
-        [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void Loaded_LoadOrderedUnits()
-        {
-            // Performs standard cache setup, loads data, verifies 2 units (USD and EUR).
-            // Asserts USD name is "United States - Dollar", abbreviation is "USD".
-            // Asserts EUR name is "Europe - Euro", abbreviation is "EUR".
+            var symbols = loader.GetCurrencySymbols(units[0].Id, units[1].Id);
+
+            Assert.IsNotNull(symbols.Symbol1);
+            Assert.IsNotNull(symbols.Symbol2);
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void Loaded_LoadOrderedRatios()
+        public async Task Loaded_GetCurrencySymbols_Invalid()
         {
-            // Performs standard cache setup, loads data, gets ordered units and ratios for USD.
-            // Verifies 2 ratios exist. USD ratio is ~1.0, EUR ratio is ~0.920503.
+            var loader = await LoadedLoaderAsync();
+
+            var symbols = loader.GetCurrencySymbols(-1, -2);
+
+            Assert.AreEqual(string.Empty, symbols.Symbol1, "An unknown unit must not yield a symbol.");
+            Assert.AreEqual(string.Empty, symbols.Symbol2);
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void Loaded_GetCurrencySymbols_Valid()
+        public async Task Loaded_GetCurrencyRatioEquality_Valid()
         {
-            // Performs standard cache setup, loads data, gets symbols for USD and EUR.
-            // Asserts USD symbol is "$", EUR symbol is "\u20ac" (€).
+            var loader = await LoadedLoaderAsync();
+            var units = loader.GetOrderedUnits(0);
+
+            var equality = loader.GetCurrencyRatioEquality(units[0].Id, units[1].Id);
+
+            Assert.IsFalse(string.IsNullOrEmpty(equality.Ratio1), "The ratio line was empty.");
+            Assert.IsFalse(string.IsNullOrEmpty(equality.Ratio2), "The accessible ratio line was empty.");
+
+            // The accessible form spells the currencies out rather than abbreviating them.
+            StringAssert.Contains(equality.Ratio2, units[0].CountryName);
+            StringAssert.Contains(equality.Ratio2, units[0].Name);
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void Loaded_GetCurrencySymbols_Invalid()
+        public async Task Loaded_GetCurrencyRatioEquality_Invalid()
         {
-            // Performs standard cache setup, loads data.
-            // Creates fake units and verifies GetCurrencySymbols returns empty strings.
-            // Also verifies mixed valid/invalid unit combinations return empty strings.
+            var loader = await LoadedLoaderAsync();
+
+            var equality = loader.GetCurrencyRatioEquality(-1, -2);
+
+            Assert.AreEqual(string.Empty, equality.Ratio1);
+            Assert.AreEqual(string.Empty, equality.Ratio2);
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void Loaded_GetCurrencyRatioEquality_Valid()
+        public async Task LoadFromWeb_Success()
         {
-            // Performs standard cache setup, loads data, gets ratio equality for USD->EUR.
-            // Asserts first is "1 USD = 0.9205 EUR", second is "1 United States Dollar = 0.9205 Europe Euro".
+            var loader = new CurrencyDataLoader("en-US");
+
+            bool didLoad = await loader.TryLoadDataFromWebAsync();
+
+            Assert.IsTrue(didLoad);
+            Assert.IsTrue(loader.LoadFinished());
+            Assert.IsTrue(loader.LoadedFromWeb());
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs")]
-        public void Loaded_GetCurrencyRatioEquality_Invalid()
+        public async Task Load_Success_LoadedFromCache()
         {
-            // Performs standard cache setup, loads data.
-            // Creates fake units and verifies GetCurrencyRatioEquality returns empty strings.
-            // Also verifies mixed valid/invalid unit combinations return empty strings.
+            // A cache written moments ago is still fresh, so the loader uses it and never goes out.
+            await PrimeCacheAsync();
+
+            var loader = new CurrencyDataLoader("en-US");
+            bool didLoad = await loader.TryLoadDataFromCacheAsync();
+
+            Assert.IsTrue(didLoad);
+            Assert.IsTrue(loader.LoadedFromCache());
+            Assert.IsFalse(loader.LoadedFromWeb());
         }
 
         [TestMethod]
-        [Ignore("Requires UWP storage and web APIs - CurrencyDataLoader.RoundCurrencyRatio is a native static method")]
+        public async Task Load_Success_LoadedFromWeb()
+        {
+            // A cache older than a day is refreshed from the web rather than used as-is.
+            await PrimeCacheAsync(timestamp: DateTimeOffset.UtcNow.AddDays(-2));
+
+            var loader = new CurrencyDataLoader("en-US");
+            bool didLoad = await loader.TryLoadDataFromCacheAsync();
+
+            Assert.IsTrue(didLoad);
+            Assert.IsTrue(loader.LoadedFromWeb(), "A stale cache should have been refreshed from the web.");
+        }
+
+
+        [TestMethod]
         public void Test_RoundCurrencyRatio()
         {
-            // Tests CurrencyDataLoader.RoundCurrencyRatio with various values:
-            // Whole numbers: RoundCurrencyRatio(1234567) == 1234567, RoundCurrencyRatio(0) == 0
-            // Numbers with few decimals: RoundCurrencyRatio(9999.999) == 9999.999
-            // Rounding at 4 decimal places: RoundCurrencyRatio(4815.162342) == 4815.1623
-            // Small fractions: RoundCurrencyRatio(0.12) == 0.12
-            // Very small fractions with significant digits: RoundCurrencyRatio(0.000000002134987218) == 0.000000002135
+            (double Ratio, double Expected)[] cases =
+            {
+                (1234567, 1234567),
+                (0, 0),
+                (9999.999, 9999.999),
+                (8765.4321, 8765.4321),
+                (4815.162342, 4815.1623),
+                (4815.162358, 4815.1624),
+                (4815.162388934723, 4815.1624),
+                (0.12, 0.12),
+                (0.123, 0.123),
+                (0.1234, 0.1234),
+                (0.12343, 0.1234),
+                (0.0321, 0.0321),
+                (0.03211, 0.03211),
+                (0.032119, 0.03212),
+                (0.00322119, 0.003221),
+                (0.00123269, 0.001233),
+                (0.00076269, 0.0007627),
+                (0.000069, 0.000069),
+                (0.000061, 0.000061),
+                (0.000054612, 0.00005461),
+                (0.000054616, 0.00005462),
+                (0.000005416, 0.000005416),
+                (0.0000016134324, 0.000001613),
+                (0.0000096134324, 0.000009613),
+                (0.0000032169348392, 0.000003217),
+                (0.000000002134987218, 0.000000002135),
+                (0.000000000000087231445, 0.00000000000008723),
+            };
+
+            foreach (var (ratio, expected) in cases)
+            {
+                Assert.AreEqual(expected, CurrencyDataLoader.RoundCurrencyRatio(ratio), 0d,
+                    $"RoundCurrencyRatio({ratio})");
+            }
+        }
+
+        private sealed class LoadCompletionCallback : IViewModelCurrencyCallback
+        {
+            private readonly TaskCompletionSource<bool> _completion;
+
+            public LoadCompletionCallback(TaskCompletionSource<bool> completion)
+            {
+                _completion = completion;
+            }
+
+            public void CurrencyDataLoadFinished(bool didLoad)
+            {
+                _completion.TrySetResult(didLoad);
+            }
+
+            public void CurrencyTimestampUpdated(string timestamp, bool isWeekOld)
+            {
+            }
+
+            public void NetworkBehaviorChanged(NetworkAccessBehavior newBehavior)
+            {
+            }
         }
     }
 }

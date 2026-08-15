@@ -59,10 +59,60 @@ namespace winrt::CalcManager::Interop::implementation
                     m_commands.assign(cmds->begin(), cmds->end());
                 }
                 m_isNegative = opndCmd->IsNegative();
+                m_isDecimalPresent = opndCmd->IsDecimalPresent();
+                m_isSciFmt = opndCmd->IsSciFmt();
             }
             break;
         }
         }
+    }
+
+    ExpressionCommandWrapper::ExpressionCommandWrapper(
+        CalcManager::Interop::CommandType type,
+        int32_t command,
+        array_view<int32_t const> commands,
+        bool isNegative,
+        bool isDecimalPresent,
+        bool isSciFmt)
+        : m_type(type)
+        , m_command(command)
+        , m_commands(commands.begin(), commands.end())
+        , m_isNegative(isNegative)
+        , m_isDecimalPresent(isDecimalPresent)
+        , m_isSciFmt(isSciFmt)
+    {
+    }
+
+    std::shared_ptr<IExpressionCommand> ExpressionCommandWrapper::ToUnderlying() const
+    {
+        switch (m_type)
+        {
+        case CalcManager::Interop::CommandType::UnaryCommand:
+            // Unary commands contain one or two command codes.
+            if (m_commands.size() == 1)
+            {
+                return std::make_shared<CUnaryCommand>(m_commands[0]);
+            }
+            if (m_commands.size() == 2)
+            {
+                return std::make_shared<CUnaryCommand>(m_commands[0], m_commands[1]);
+            }
+            throw hresult_invalid_argument(L"ill-formed unary command.");
+
+        case CalcManager::Interop::CommandType::BinaryCommand:
+            return std::make_shared<CBinaryCommand>(m_command);
+
+        case CalcManager::Interop::CommandType::Parentheses:
+            return std::make_shared<CParentheses>(m_command);
+
+        case CalcManager::Interop::CommandType::OperandCommand:
+        {
+            auto subCommands = std::make_shared<std::vector<int>>(m_commands.begin(), m_commands.end());
+            return std::make_shared<COpndCommand>(std::move(subCommands), m_isNegative, m_isDecimalPresent, m_isSciFmt);
+        }
+        }
+
+        throw hresult_invalid_argument(L"unhandled command type.");
     }
 
     CalcManager::Interop::CommandType ExpressionCommandWrapper::Type()
@@ -83,5 +133,15 @@ namespace winrt::CalcManager::Interop::implementation
     bool ExpressionCommandWrapper::IsNegative()
     {
         return m_isNegative;
+    }
+
+    bool ExpressionCommandWrapper::IsDecimalPresent()
+    {
+        return m_isDecimalPresent;
+    }
+
+    bool ExpressionCommandWrapper::IsSciFmt()
+    {
+        return m_isSciFmt;
     }
 }

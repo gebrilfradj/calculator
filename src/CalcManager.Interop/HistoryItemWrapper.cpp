@@ -42,6 +42,42 @@ namespace winrt::CalcManager::Interop::implementation
         m_result = hstring(histVec.result);
     }
 
+    HistoryItemWrapper::HistoryItemWrapper(
+        array_view<CalcManager::Interop::HistoryToken const> tokens,
+        array_view<CalcManager::Interop::ExpressionCommandWrapper const> commands,
+        hstring const& expression,
+        hstring const& result)
+        : m_tokens(tokens.begin(), tokens.end())
+        , m_commands(commands.begin(), commands.end())
+        , m_expression(expression)
+        , m_result(result)
+    {
+    }
+
+    std::shared_ptr<CalculationManager::HISTORYITEM> HistoryItemWrapper::ToUnderlying() const
+    {
+        CalculationManager::HISTORYITEMVECTOR nativeItem;
+
+        nativeItem.spTokens = std::make_shared<std::vector<std::pair<std::wstring, int>>>();
+        for (auto const& token : m_tokens)
+        {
+            nativeItem.spTokens->push_back(std::make_pair(std::wstring(token.Value()), token.CommandIndex()));
+        }
+
+        auto nativeCommands = std::make_shared<std::vector<std::shared_ptr<IExpressionCommand>>>();
+        for (auto const& command : m_commands)
+        {
+            nativeCommands->push_back(get_self<ExpressionCommandWrapper>(command)->ToUnderlying());
+        }
+        nativeItem.spCommands = std::move(nativeCommands);
+
+        nativeItem.expression = std::wstring(m_expression);
+        nativeItem.result = std::wstring(m_result);
+
+        return std::make_shared<CalculationManager::HISTORYITEM>(
+            CalculationManager::HISTORYITEM{ std::move(nativeItem) });
+    }
+
     com_array<CalcManager::Interop::HistoryToken> HistoryItemWrapper::Tokens()
     {
         return com_array<CalcManager::Interop::HistoryToken>(m_tokens);

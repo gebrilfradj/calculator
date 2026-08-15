@@ -12,11 +12,18 @@ namespace winrt::CalcManager::Interop::implementation
     {
         HistoryItemWrapper() = default;
         HistoryItemWrapper(const std::shared_ptr<CalculationManager::HISTORYITEM>& item);
+        HistoryItemWrapper(
+            array_view<CalcManager::Interop::HistoryToken const> tokens,
+            array_view<CalcManager::Interop::ExpressionCommandWrapper const> commands,
+            hstring const& expression,
+            hstring const& result);
 
         com_array<CalcManager::Interop::HistoryToken> Tokens();
         com_array<CalcManager::Interop::ExpressionCommandWrapper> Commands();
         hstring Expression();
         hstring Result();
+
+        std::shared_ptr<CalculationManager::HISTORYITEM> ToUnderlying() const;
 
     private:
         std::vector<CalcManager::Interop::HistoryToken> m_tokens;

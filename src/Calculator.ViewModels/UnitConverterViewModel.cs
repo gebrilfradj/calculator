@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Text;
 using CalculatorApp.ViewModel.Common;
 using CalculatorApp.ViewModel.Common.Automation;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -110,12 +111,11 @@ namespace CalculatorApp.ViewModel
 
         // Model
         private readonly CalcManager.Interop.UnitConverterWrapper _model;
+        private readonly object _modelLock = new object();
         private readonly DataLoaders.CurrencyDataLoader _currencyDataLoader;
         private readonly Windows.UI.Core.CoreDispatcher _dispatcher;
         private char _decimalSeparator;
-#pragma warning disable CS0414 // assigned but value is never used — will be used when currency support is complete
         private bool _isInputBlocked;
-#pragma warning restore CS0414
         private bool _isCategoryChanging;
         private bool _isCurrencyDataLoaded;
 
@@ -203,7 +203,7 @@ namespace CalculatorApp.ViewModel
         private Category _currentCategory;
 
         // Internal state
-        private List<(string Value, int UnitId)> _cachedSuggestedValues;
+        private List<(string Value, CalcManager.Interop.UnitWrapper Unit)> _cachedSuggestedValues;
         private readonly object _cacheMutex = new object();
         private string _valueFromUnlocalized;
         private string _valueToUnlocalized;
@@ -213,6 +213,7 @@ namespace CalculatorApp.ViewModel
 
         // Currency formatters
         private Windows.Globalization.NumberFormatting.CurrencyFormatter _currencyFormatter;
+        private Windows.Globalization.NumberFormatting.DecimalFormatter _decimalFormatter;
         private Windows.Globalization.NumberFormatting.CurrencyFormatter _currencyFormatter1;
         private Windows.Globalization.NumberFormatting.CurrencyFormatter _currencyFormatter2;
 
@@ -222,15 +223,77 @@ namespace CalculatorApp.ViewModel
         private string _localizedConversionResultFormat;
 
         private enum ConversionParameter { Source, Target }
-#pragma warning disable CS0414
         private ConversionParameter _value1cp;
-#pragma warning restore CS0414
 
         private Windows.Globalization.NumberFormatting.CurrencyFormatter CurrencyFormatterFrom =>
             _value1cp == ConversionParameter.Source ? _currencyFormatter1 : _currencyFormatter2;
 
         private Windows.Globalization.NumberFormatting.CurrencyFormatter CurrencyFormatterTo =>
             _value1cp == ConversionParameter.Target ? _currencyFormatter1 : _currencyFormatter2;
+
+        private string ValueFrom
+        {
+            get => _value1cp == ConversionParameter.Source ? Value1 : Value2;
+            set
+            {
+                if (_value1cp == ConversionParameter.Source)
+                {
+                    Value1 = value;
+                }
+                else
+                {
+                    Value2 = value;
+                }
+            }
+        }
+
+        private string ValueTo
+        {
+            get => _value1cp == ConversionParameter.Target ? Value1 : Value2;
+            set
+            {
+                if (_value1cp == ConversionParameter.Target)
+                {
+                    Value1 = value;
+                }
+                else
+                {
+                    Value2 = value;
+                }
+            }
+        }
+
+        private Unit UnitFrom
+        {
+            get => _value1cp == ConversionParameter.Source ? Unit1 : Unit2;
+            set
+            {
+                if (_value1cp == ConversionParameter.Source)
+                {
+                    Unit1 = value;
+                }
+                else
+                {
+                    Unit2 = value;
+                }
+            }
+        }
+
+        private Unit UnitTo
+        {
+            get => _value1cp == ConversionParameter.Target ? Unit1 : Unit2;
+            set
+            {
+                if (_value1cp == ConversionParameter.Target)
+                {
+                    Unit1 = value;
+                }
+                else
+                {
+                    Unit2 = value;
+                }
+            }
+        }
 
         public UnitConverterViewModel()
         {
@@ -270,6 +333,10 @@ namespace CalculatorApp.ViewModel
             _model.SetViewModelCallback(vmCallback);
 
             _decimalSeparator = LocalizationSettings.GetInstance().GetDecimalSeparator();
+
+            _decimalFormatter = LocalizationSettings.GetInstance().GetRegionalSettingsAwareDecimalFormatter();
+            _decimalFormatter.FractionDigits = 0;
+            _decimalFormatter.IsGrouped = true;
 
             // Initialize default currency formatter (uses user's currency or USD fallback)
             string userCurrency = Windows.System.UserProfile.GlobalizationPreferences.Currencies.Count > 0
@@ -314,6 +381,8 @@ namespace CalculatorApp.ViewModel
             private set => SetProperty(ref _isCurrencyCurrentCategory, value);
         }
 
+        internal bool IsCurrencyDataLoaded => _isCurrencyDataLoaded;
+
         public Category CurrentCategory
         {
             get => _currentCategory;
@@ -344,13 +413,26 @@ namespace CalculatorApp.ViewModel
 
         #region Commands
 
-        public RelayCommand<object> CategoryChangedCommand => new RelayCommand<object>(OnCategoryChanged);
-        public RelayCommand<object> UnitChangedCommand => new RelayCommand<object>(OnUnitChanged);
-        public RelayCommand<object> SwitchActiveCommand => new RelayCommand<object>(OnSwitchActive);
-        public RelayCommand<object> ButtonPressedCommand => new RelayCommand<object>(OnButtonPressed);
+        private RelayCommand<object> _categoryChangedCommand;
+        private RelayCommand<object> _unitChangedCommand;
+        private RelayCommand<object> _switchActiveCommand;
+        private RelayCommand<object> _buttonPressedCommand;
+        private RelayCommand<object> _copyCommand;
+        private RelayCommand<object> _pasteCommand;
+
+        public RelayCommand<object> CategoryChangedCommand =>
+            _categoryChangedCommand ?? (_categoryChangedCommand = new RelayCommand<object>(OnCategoryChanged));
+        public RelayCommand<object> UnitChangedCommand =>
+            _unitChangedCommand ?? (_unitChangedCommand = new RelayCommand<object>(OnUnitChanged));
+        public RelayCommand<object> SwitchActiveCommand =>
+            _switchActiveCommand ?? (_switchActiveCommand = new RelayCommand<object>(OnSwitchActive));
+        public RelayCommand<object> ButtonPressedCommand =>
+            _buttonPressedCommand ?? (_buttonPressedCommand = new RelayCommand<object>(OnButtonPressed));
         public RelayCommand<object> ButtonPressed => ButtonPressedCommand;
-        public RelayCommand<object> CopyCommand => new RelayCommand<object>(OnCopyCommand);
-        public RelayCommand<object> PasteCommand => new RelayCommand<object>(OnPasteCommand);
+        public RelayCommand<object> CopyCommand =>
+            _copyCommand ?? (_copyCommand = new RelayCommand<object>(OnCopyCommand));
+        public RelayCommand<object> PasteCommand =>
+            _pasteCommand ?? (_pasteCommand = new RelayCommand<object>(OnPasteCommand));
 
         #endregion
 
@@ -376,45 +458,63 @@ namespace CalculatorApp.ViewModel
 
         public void OnPaste(string stringToPaste)
         {
-            if (string.IsNullOrEmpty(stringToPaste))
+            if (string.IsNullOrEmpty(stringToPaste) || CopyPasteManager.IsErrorMessage(stringToPaste))
             {
+                DisplayPasteError();
                 return;
             }
 
-            bool sendNegate = false;
             bool isFirstLegalChar = true;
+            bool sendNegate = false;
+            var accumulation = new StringBuilder();
 
-            foreach (char ch in stringToPaste)
+            lock (_modelLock)
             {
-                bool canSendNegate;
-                var buttonId = MapCharacterToButtonId(ch, out canSendNegate);
-
-                if (buttonId == NumbersAndOperatorsEnum.None)
+                foreach (char ch in stringToPaste)
                 {
-                    // Invalid character — reset negate tracking
-                    sendNegate = false;
-                    continue;
-                }
+                    bool canSendNegate;
+                    var buttonId = MapCharacterToButtonId(ch, out canSendNegate);
 
-                if (buttonId == NumbersAndOperatorsEnum.Negate)
-                {
-                    sendNegate = true;
-                    continue;
-                }
+                    if (buttonId == NumbersAndOperatorsEnum.None)
+                    {
+                        sendNegate = false;
+                        continue;
+                    }
 
-                if (isFirstLegalChar)
-                {
-                    // Clear display on first valid input
-                    _model.SendCommand(CalcManager.Interop.UnitConverterCommand.Clear);
-                    isFirstLegalChar = false;
-                }
+                    if (isFirstLegalChar)
+                    {
+                        // Send Clear before sending anything that will actually apply to the field.
+                        _model.SendCommand(CalcManager.Interop.UnitConverterCommand.Clear);
+                        isFirstLegalChar = false;
 
-                _model.SendCommand(CommandFromButtonId(buttonId));
+                        // A leading minus is a sign, but it has to follow the digit it applies to or
+                        // the engine ignores it, so remember it rather than sending it now.
+                        if (buttonId == NumbersAndOperatorsEnum.Negate)
+                        {
+                            sendNegate = true;
+                        }
+                    }
 
-                if (sendNegate && canSendNegate)
-                {
-                    _model.SendCommand(CalcManager.Interop.UnitConverterCommand.Negate);
-                    sendNegate = false;
+                    if (buttonId != NumbersAndOperatorsEnum.Negate)
+                    {
+                        _model.SendCommand(CommandFromButtonId(buttonId));
+
+                        if (sendNegate)
+                        {
+                            if (canSendNegate)
+                            {
+                                _model.SendCommand(CalcManager.Interop.UnitConverterCommand.Negate);
+                            }
+                            sendNegate = false;
+                        }
+                    }
+
+                    accumulation.Append(ch);
+                    UpdateInputBlocked(accumulation.ToString());
+                    if (_isInputBlocked)
+                    {
+                        break;
+                    }
                 }
             }
 
@@ -471,23 +571,29 @@ namespace CalculatorApp.ViewModel
 
         internal void ResetView()
         {
-            _model.SendCommand(CalcManager.Interop.UnitConverterCommand.Reset);
+            lock (_modelLock)
+            {
+                _model.SendCommand(CalcManager.Interop.UnitConverterCommand.Reset);
+            }
             OnCategoryChanged(null);
         }
 
         internal void PopulateData()
         {
-            var categories = _model.GetCategories();
-            Categories.Clear();
-            foreach (var cat in categories)
+            lock (_modelLock)
             {
-                Categories.Add(new Category(cat.Id, cat.Name, cat.SupportsNegative));
+                var categories = _model.GetCategories();
+                Categories.Clear();
+                foreach (var cat in categories)
+                {
+                    Categories.Add(new Category(cat.Id, cat.Name, cat.SupportsNegative));
+                }
+
+                RestoreUserPreferences();
+
+                var currentCat = _model.GetCurrentCategory();
+                CurrentCategory = new Category(currentCat.Id, currentCat.Name, currentCat.SupportsNegative);
             }
-
-            RestoreUserPreferences();
-
-            var currentCat = _model.GetCurrentCategory();
-            CurrentCategory = new Category(currentCat.Id, currentCat.Name, currentCat.SupportsNegative);
         }
 
         internal NumbersAndOperatorsEnum MapCharacterToButtonId(char ch, out bool canSendNegate)
@@ -502,6 +608,7 @@ namespace CalculatorApp.ViewModel
 
             if (ch == _decimalSeparator)
             {
+                canSendNegate = true;
                 return NumbersAndOperatorsEnum.Decimal;
             }
 
@@ -510,12 +617,25 @@ namespace CalculatorApp.ViewModel
                 return NumbersAndOperatorsEnum.Negate;
             }
 
+            var localization = LocalizationSettings.GetInstance();
+            if (localization.IsLocalizedDigit(ch))
+            {
+                canSendNegate = true;
+                return NumbersAndOperatorsEnum.Zero + (ch - localization.GetDigitSymbolFromEnUsDigit('0'));
+            }
+
             return NumbersAndOperatorsEnum.None;
         }
 
         internal void DisplayPasteError()
         {
-            string errorMsg = AppResourceProvider.GetInstance().GetResourceString("InvalidInput");
+            // The native code reads this from the engine's own string table, not from the app
+            // resources (UnitConverterViewModel.cpp:428), and StandardCalculatorViewModel does the
+            // same at DisplayPasteError. There is no "InvalidInput" app resource, so asking for one
+            // returned nothing and a rejected paste blanked the display instead of explaining itself.
+            const int IDS_ERRORS_FIRST = 99;
+            const int IDS_DOMAIN = IDS_ERRORS_FIRST + 1;
+            string errorMsg = AppResourceProvider.GetInstance().GetCEngineString(IDS_DOMAIN.ToString());
             Value1 = errorMsg;
             Value2 = errorMsg;
         }
@@ -525,15 +645,16 @@ namespace CalculatorApp.ViewModel
             _valueFromUnlocalized = from;
             _valueToUnlocalized = to;
 
-            Value1 = ConvertToLocalizedString(from, true, CurrencyFormatterFrom);
+            ValueFrom = ConvertToLocalizedString(from, true, CurrencyFormatterFrom);
             UpdateInputBlocked(from);
-            Value2 = ConvertToLocalizedString(to, true, CurrencyFormatterTo);
+            ValueTo = ConvertToLocalizedString(to, true, CurrencyFormatterTo);
 
             UpdateValue1AutomationName();
             UpdateValue2AutomationName();
         }
 
-        internal void UpdateSupplementaryResults(List<(string Value, int UnitId)> suggestedValues)
+        internal void UpdateSupplementaryResults(
+            List<(string Value, CalcManager.Interop.UnitWrapper Unit)> suggestedValues)
         {
             lock (_cacheMutex)
             {
@@ -544,7 +665,9 @@ namespace CalculatorApp.ViewModel
 
         internal void OnMaxDigitsReached()
         {
-            string announcement = AppResourceProvider.GetInstance().GetResourceString("Format_MaxDigitsReached");
+            string format = AppResourceProvider.GetInstance().GetResourceString("Format_MaxDigitsReached");
+            string announcement = LocalizationStringUtil.GetLocalizedString(
+                format, _lastAnnouncedConversionResult ?? string.Empty);
             Announcement = CalculatorAnnouncement.GetMaxDigitsReachedAnnouncement(announcement);
         }
 
@@ -553,11 +676,23 @@ namespace CalculatorApp.ViewModel
             if (!UnitsAreValid())
                 return;
 
+            var localSettings = Windows.Storage.ApplicationData.Current.LocalSettings;
             if (!IsCurrencyCurrentCategory)
             {
-                var localSettings = Windows.Storage.ApplicationData.Current.LocalSettings;
-                var userPreferences = _model.SaveUserPreferences();
+                string userPreferences;
+                lock (_modelLock)
+                {
+                    userPreferences = _model.SaveUserPreferences();
+                }
                 localSettings.Values["UnitConverterPreferences"] = userPreferences;
+            }
+            else if (!string.IsNullOrEmpty(UnitFrom?.Abbreviation)
+                && !string.IsNullOrEmpty(UnitTo?.Abbreviation))
+            {
+                localSettings.Values[DataLoaders.UnitConverterResourceKeys.CurrencyUnitFromKey] =
+                    UnitFrom.Abbreviation;
+                localSettings.Values[DataLoaders.UnitConverterResourceKeys.CurrencyUnitToKey] =
+                    UnitTo.Abbreviation;
             }
         }
 
@@ -569,7 +704,10 @@ namespace CalculatorApp.ViewModel
                 if (localSettings.Values.ContainsKey("UnitConverterPreferences"))
                 {
                     string userPreferences = (string)localSettings.Values["UnitConverterPreferences"];
-                    _model.RestoreUserPreferences(userPreferences);
+                    lock (_modelLock)
+                    {
+                        _model.RestoreUserPreferences(userPreferences);
+                    }
                 }
             }
         }
@@ -586,21 +724,6 @@ namespace CalculatorApp.ViewModel
         #endregion
 
         #region Private Methods
-
-        private void InitializeView()
-        {
-            var categories = _model.GetCategories();
-            Categories.Clear();
-            foreach (var cat in categories)
-            {
-                Categories.Add(new Category(cat.Id, cat.Name, cat.SupportsNegative));
-            }
-
-            RestoreUserPreferences();
-
-            var currentCat = _model.GetCurrentCategory();
-            CurrentCategory = new Category(currentCat.Id, currentCat.Name, currentCat.SupportsNegative);
-        }
 
         protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
         {
@@ -656,13 +779,12 @@ namespace CalculatorApp.ViewModel
 
         private void OnCategoryChanged(object unused)
         {
-            _model.SendCommand(CalcManager.Interop.UnitConverterCommand.Clear);
             ResetCategory();
         }
 
         private void OnUnitChanged(object unused)
         {
-            if (Unit1 == null || Unit2 == null)
+            if (UnitFrom == null || UnitTo == null)
                 return;
 
             UpdateCurrencyFormatter();
@@ -670,31 +792,58 @@ namespace CalculatorApp.ViewModel
             if (IsCurrencyCurrentCategory)
             {
                 // Update currency symbols
-                var symbols = _currencyDataLoader.GetCurrencySymbols(Unit1.ModelUnitID(), Unit2.ModelUnitID());
-                CurrencySymbol1 = Value1Active ? symbols.Symbol1 : symbols.Symbol2;
-                CurrencySymbol2 = Value1Active ? symbols.Symbol2 : symbols.Symbol1;
+                var symbols = _currencyDataLoader.GetCurrencySymbols(
+                    UnitFrom.ModelUnitID(), UnitTo.ModelUnitID());
+                CurrencySymbol1 = _value1cp == ConversionParameter.Source
+                    ? symbols.Symbol1
+                    : symbols.Symbol2;
+                CurrencySymbol2 = _value1cp == ConversionParameter.Source
+                    ? symbols.Symbol2
+                    : symbols.Symbol1;
 
                 // Update ratio display
-                var ratios = _currencyDataLoader.GetCurrencyRatioEquality(Unit1.ModelUnitID(), Unit2.ModelUnitID());
+                var ratios = _currencyDataLoader.GetCurrencyRatioEquality(
+                    UnitFrom.ModelUnitID(), UnitTo.ModelUnitID());
                 CurrencyRatioEquality = ratios.Ratio1;
                 CurrencyRatioEqualityAutomationName = ratios.Ratio2;
             }
+            else
+            {
+                CurrencySymbol1 = string.Empty;
+                CurrencySymbol2 = string.Empty;
+                CurrencyRatioEquality = string.Empty;
+                CurrencyRatioEqualityAutomationName = string.Empty;
+            }
 
             // Always tell the native engine the current unit types (matches C++ behavior)
-            _model.SetCurrentUnitTypes(
-                new CalcManager.Interop.UnitWrapper { Id = Unit1.ModelUnitID(), Name = Unit1.Name, Abbreviation = Unit1.Abbreviation, AccessibleName = Unit1.AccessibleName },
-                new CalcManager.Interop.UnitWrapper { Id = Unit2.ModelUnitID(), Name = Unit2.Name, Abbreviation = Unit2.Abbreviation, AccessibleName = Unit2.AccessibleName });
+            lock (_modelLock)
+            {
+                _model.SetCurrentUnitTypes(
+                    new CalcManager.Interop.UnitWrapper { Id = UnitFrom.ModelUnitID(), Name = UnitFrom.Name, Abbreviation = UnitFrom.Abbreviation, AccessibleName = UnitFrom.AccessibleName },
+                    new CalcManager.Interop.UnitWrapper { Id = UnitTo.ModelUnitID(), Name = UnitTo.Name, Abbreviation = UnitTo.Abbreviation, AccessibleName = UnitTo.AccessibleName });
+            }
 
             SaveUserPreferences();
         }
 
         private void OnSwitchActive(object unused)
         {
-            Value1Active = !Value1Active;
-            Value2Active = !Value2Active;
-
             // Switch conversion parameter mapping
             _value1cp = _value1cp == ConversionParameter.Source ? ConversionParameter.Target : ConversionParameter.Source;
+
+            // The active side follows the source, and the side being turned off goes first.
+            // Toggling both flags instead leaves them momentarily both true, which re-enters this
+            // method through the property side effect below and undoes the switch.
+            if (_value1cp == ConversionParameter.Source)
+            {
+                Value2Active = false;
+                Value1Active = true;
+            }
+            else
+            {
+                Value1Active = false;
+                Value2Active = true;
+            }
 
             // Swap the unlocalized values
             var temp = _valueFromUnlocalized;
@@ -706,8 +855,18 @@ namespace CalculatorApp.ViewModel
             Unit1AutomationName = Unit2AutomationName;
             Unit2AutomationName = tempAutoName;
 
+            // The from/to formats follow the values, or Narrator would label the fields the wrong
+            // way round once the active value has moved.
+            EnsureValueFormatsLoaded();
+            var tempFormat = _localizedValueFromFormat;
+            _localizedValueFromFormat = _localizedValueToFormat;
+            _localizedValueToFormat = tempFormat;
+
             _isInputBlocked = false;
-            _model.SwitchActive(_valueFromUnlocalized ?? "0");
+            lock (_modelLock)
+            {
+                _model.SwitchActive(_valueFromUnlocalized ?? "0");
+            }
 
             UpdateIsDecimalEnabled();
         }
@@ -733,14 +892,18 @@ namespace CalculatorApp.ViewModel
             if (command == CalcManager.Interop.UnitConverterCommand.Clear && IsDropDownOpen)
                 return;
 
-            // Block input if max decimal digits reached (except for clear/backspace)
-            if (_isInputBlocked && command != CalcManager.Interop.UnitConverterCommand.Clear
-                && command != CalcManager.Interop.UnitConverterCommand.Backspace)
+            lock (_modelLock)
             {
-                return;
-            }
+                // Block input if max decimal digits reached (except for clear/backspace)
+                if (_isInputBlocked && !_model.IsSwitchedActive
+                    && command != CalcManager.Interop.UnitConverterCommand.Clear
+                    && command != CalcManager.Interop.UnitConverterCommand.Backspace)
+                {
+                    return;
+                }
 
-            _model.SendCommand(command);
+                _model.SendCommand(command);
+            }
         }
 
         private static CalcManager.Interop.UnitConverterCommand CommandFromButtonId(NumbersAndOperatorsEnum button)
@@ -774,20 +937,17 @@ namespace CalculatorApp.ViewModel
 
                 if (_cachedSuggestedValues != null)
                 {
-                    foreach (var (Value, UnitId) in _cachedSuggestedValues)
+                    foreach (var (Value, ModelUnit) in _cachedSuggestedValues)
                     {
-                        var unit = FindUnitInList(new CalcManager.Interop.UnitWrapper { Id = UnitId });
-                        if (unit != null)
+                        var unit = CreateUnit(ModelUnit);
+                        var result = new SupplementaryResult(ConvertToLocalizedString(Value), unit);
+                        if (unit.IsModelUnitWhimsical())
                         {
-                            var result = new SupplementaryResult(ConvertToLocalizedString(Value), unit);
-                            if (unit.IsModelUnitWhimsical())
-                            {
-                                whimsicals.Add(result);
-                            }
-                            else
-                            {
-                                SupplementaryResults.Add(result);
-                            }
+                            whimsicals.Add(result);
+                        }
+                        else
+                        {
+                            SupplementaryResults.Add(result);
                         }
                     }
                 }
@@ -833,8 +993,42 @@ namespace CalculatorApp.ViewModel
 
             UpdateIsDecimalEnabled();
 
-            // Truncate current value to new currency's fraction digits and re-paste (matching C++)
-            OnPaste(TruncateFractionDigits(_valueFromUnlocalized, CurrencyFormatterFrom.FractionDigits));
+            if (TryPrepareCurrencyInputForPaste(
+                _valueFromUnlocalized,
+                CurrencyFormatterFrom.FractionDigits,
+                _decimalSeparator,
+                out string preparedValue))
+            {
+                OnPaste(preparedValue);
+            }
+        }
+
+        internal static bool TryPrepareCurrencyInputForPaste(
+            string value,
+            int fractionDigits,
+            out string preparedValue)
+        {
+            return TryPrepareCurrencyInputForPaste(value, fractionDigits, '.', out preparedValue);
+        }
+
+        internal static bool TryPrepareCurrencyInputForPaste(
+            string value,
+            int fractionDigits,
+            char decimalSeparator,
+            out string preparedValue)
+        {
+            preparedValue = value;
+            if (string.IsNullOrEmpty(value) || value.IndexOf('e') >= 0 || value.IndexOf('E') >= 0)
+            {
+                return false;
+            }
+
+            preparedValue = TruncateFractionDigits(value, fractionDigits);
+            if (decimalSeparator != '.')
+            {
+                preparedValue = preparedValue.Replace('.', decimalSeparator);
+            }
+            return true;
         }
 
         private static string TruncateFractionDigits(string n, int digitCount)
@@ -884,23 +1078,31 @@ namespace CalculatorApp.ViewModel
 
         private void SetSelectedUnits()
         {
-            if (IsCurrencyCurrentCategory)
+            lock (_modelLock)
             {
-                SetSelectedCurrencyUnits();
-                return;
-            }
-
-            var result = _model.SetCurrentCategory(
-                new CalcManager.Interop.CategoryWrapper
+                if (IsCurrencyCurrentCategory)
                 {
-                    Id = CurrentCategory.GetModelCategoryId(),
-                    Name = CurrentCategory.Name,
-                    SupportsNegative = CurrentCategory.NegateVisibility == Windows.UI.Xaml.Visibility.Visible
-                });
+                    if (_isCurrencyDataLoaded && !CurrencyDataLoadFailed)
+                    {
+                        _model.ResetCategoriesAndRatios();
+                    }
 
-            BuildUnitList(result.Units);
-            AssignSelectedUnit(u => Unit1 = u, FindUnitInList(result.FromUnit));
-            AssignSelectedUnit(u => Unit2 = u, FindUnitInList(result.ToUnit));
+                    SetSelectedCurrencyUnits();
+                    return;
+                }
+
+                var result = _model.SetCurrentCategory(
+                    new CalcManager.Interop.CategoryWrapper
+                    {
+                        Id = CurrentCategory.GetModelCategoryId(),
+                        Name = CurrentCategory.Name,
+                        SupportsNegative = CurrentCategory.NegateVisibility == Windows.UI.Xaml.Visibility.Visible
+                    });
+
+                BuildUnitList(result.Units);
+                AssignSelectedUnit(u => UnitFrom = u, FindUnitInList(result.FromUnit));
+                AssignSelectedUnit(u => UnitTo = u, FindUnitInList(result.ToUnit));
+            }
         }
 
         // Assigns a Unit1/Unit2 selection, containing the transient exception the bound
@@ -965,8 +1167,8 @@ namespace CalculatorApp.ViewModel
                 Units.Add(new Unit(-1, "", "", "", false));
             }
 
-            AssignSelectedUnit(u => Unit1 = u, fromUnit ?? (Units.Count > 0 ? Units[0] : null));
-            AssignSelectedUnit(u => Unit2 = u, toUnit ?? (Units.Count > 1 ? Units[1] : Units.Count > 0 ? Units[0] : null));
+            AssignSelectedUnit(u => UnitFrom = u, fromUnit ?? (Units.Count > 0 ? Units[0] : null));
+            AssignSelectedUnit(u => UnitTo = u, toUnit ?? (Units.Count > 1 ? Units[1] : Units.Count > 0 ? Units[0] : null));
         }
 
         private void BuildUnitList(CalcManager.Interop.UnitWrapper[] modelUnits)
@@ -976,7 +1178,7 @@ namespace CalculatorApp.ViewModel
             {
                 if (!u.IsWhimsical)
                 {
-                    Units.Add(new Unit(u.Id, u.Name, u.Abbreviation, u.AccessibleName, u.IsWhimsical));
+                    Units.Add(CreateUnit(u));
                 }
             }
 
@@ -984,6 +1186,16 @@ namespace CalculatorApp.ViewModel
             {
                 Units.Add(new Unit(-1, "", "", "", false));
             }
+        }
+
+        private static Unit CreateUnit(CalcManager.Interop.UnitWrapper unit)
+        {
+            return new Unit(
+                unit.Id,
+                unit.Name,
+                unit.Abbreviation,
+                unit.AccessibleName,
+                unit.IsWhimsical);
         }
 
         private Unit FindUnitInList(CalcManager.Interop.UnitWrapper target)
@@ -1024,6 +1236,8 @@ namespace CalculatorApp.ViewModel
             int lastCurrencyFractionDigits = currencyFormatter.FractionDigits;
             bool lastIsDecimalPointAlwaysDisplayed = currencyFormatter.IsDecimalPointAlwaysDisplayed;
 
+            _decimalFormatter.IsDecimalPointAlwaysDisplayed = false;
+            _decimalFormatter.FractionDigits = 0;
             currencyFormatter.IsDecimalPointAlwaysDisplayed = false;
             currencyFormatter.FractionDigits = 0;
 
@@ -1031,6 +1245,16 @@ namespace CalculatorApp.ViewModel
 
             try
             {
+                if (!double.TryParse(
+                        stringToLocalize,
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out double parsedValue))
+                {
+                    LocalizationSettings.GetInstance().LocalizeDisplayValue(ref stringToLocalize);
+                    return stringToLocalize;
+                }
+
                 // Handle scientific notation
                 int posOfE = stringToLocalize.IndexOf('e');
                 if (posOfE >= 0)
@@ -1053,16 +1277,20 @@ namespace CalculatorApp.ViewModel
                     {
                         if (allowPartialStrings && lastCurrencyFractionDigits > 0)
                         {
+                            // Allow "in progress" strings such as "3." that occur while a number is
+                            // being composed, so the separator appears as soon as it is typed.
+                            _decimalFormatter.IsDecimalPointAlwaysDisplayed = true;
                             currencyFormatter.IsDecimalPointAlwaysDisplayed = true;
                         }
 
                         // Force post-decimal digits so trailing zeroes aren't cut off
+                        _decimalFormatter.FractionDigits = stringToLocalize.Length - (posOfDecimal + 1);
                         currencyFormatter.FractionDigits = lastCurrencyFractionDigits;
                     }
 
                     if (IsCurrencyCurrentCategory)
                     {
-                        string currencyResult = currencyFormatter.Format(double.Parse(stringToLocalize, System.Globalization.CultureInfo.InvariantCulture));
+                        string currencyResult = currencyFormatter.Format(parsedValue);
                         string currencyCode = currencyFormatter.Currency;
 
                         // CurrencyFormatter always includes LangCode or Symbol. Remove the currency code.
@@ -1078,10 +1306,33 @@ namespace CalculatorApp.ViewModel
                     }
                     else
                     {
-                        // Non-currency: just localize characters
-                        LocalizationSettings.GetInstance().LocalizeDisplayValue(ref stringToLocalize);
-                        result = stringToLocalize;
+                        result = _decimalFormatter.Format(parsedValue);
                     }
+
+                    if (hasDecimal)
+                    {
+                        // GetLocaleInfoEx and DecimalFormatter disagree on the decimal separator for
+                        // some locales, and the rest of the view model keys off the former, so bring
+                        // the formatted result back in line with it.
+                        string formattedSample = _decimalFormatter.Format(1.1);
+                        int sepPos = result.IndexOf(formattedSample[1]);
+                        if (sepPos >= 0)
+                        {
+                            result = result.Remove(sepPos, 1).Insert(sepPos, _decimalSeparator.ToString());
+                        }
+                    }
+                }
+
+                // A value that formats to zero still has to keep a leading minus, and some locales
+                // put the sign at the end, which the display cannot use.
+                if ((stringToLocalize[0] == '-' && parsedValue == 0)
+                    || (result.Length > 0 && result[result.Length - 1] == '-'))
+                {
+                    if (result.Length > 0 && result[result.Length - 1] == '-')
+                    {
+                        result = result.Substring(0, result.Length - 1);
+                    }
+                    result = "-" + result;
                 }
             }
             finally
@@ -1110,20 +1361,26 @@ namespace CalculatorApp.ViewModel
 
         internal void UpdateValue1AutomationName()
         {
-            if (_localizedValueFromFormat == null)
-            {
-                _localizedValueFromFormat = AppResourceProvider.GetInstance().GetResourceString("Format_ValueFrom");
-            }
-            Value1AutomationName = GetLocalizedAutomationName(Value1, Unit1?.Name ?? string.Empty, _localizedValueFromFormat);
+            EnsureValueFormatsLoaded();
+            Value1AutomationName = GetLocalizedAutomationName(
+                Value1, Unit1?.AccessibleName ?? string.Empty, _localizedValueFromFormat);
         }
 
         internal void UpdateValue2AutomationName()
         {
-            if (_localizedValueToFormat == null)
+            EnsureValueFormatsLoaded();
+            Value2AutomationName = GetLocalizedAutomationName(
+                Value2, Unit2?.AccessibleName ?? string.Empty, _localizedValueToFormat);
+        }
+
+        private void EnsureValueFormatsLoaded()
+        {
+            if (_localizedValueFromFormat == null || _localizedValueToFormat == null)
             {
-                _localizedValueToFormat = AppResourceProvider.GetInstance().GetResourceString("Format_ValueTo");
+                var resourceProvider = AppResourceProvider.GetInstance();
+                _localizedValueFromFormat = resourceProvider.GetResourceString("Format_ValueFrom");
+                _localizedValueToFormat = resourceProvider.GetResourceString("Format_ValueTo");
             }
-            Value2AutomationName = GetLocalizedAutomationName(Value2, Unit2?.Name ?? string.Empty, _localizedValueToFormat);
         }
 
         #endregion
@@ -1138,59 +1395,95 @@ namespace CalculatorApp.ViewModel
             }
             else
             {
-                action();
+                lock (_modelLock)
+                {
+                    action();
+                }
             }
         }
 
         private sealed class UnitConverterVMCallback : CalcManager.Interop.UnitConverterVMCallbackBase
         {
-            private readonly UnitConverterViewModel _vm;
+            // Held weakly on purpose. The native UnitConverterWrapper keeps m_vmCallbackBridge,
+            // and that bridge stores its receiver by value (UnitConverterInterop.h:80), which is a
+            // strong COM reference to this object. A strong _vm here would close the loop
+            // VM -> _model -> bridge -> callback -> VM across the interop boundary, and neither the
+            // collector nor COM reference counting can break a cycle that spans it. The view model
+            // is owned by ApplicationViewModel for as long as the converter is in use, so a weak
+            // reference is enough for every callback that matters.
+            private readonly WeakReference<UnitConverterViewModel> _vm;
 
-            public UnitConverterVMCallback(UnitConverterViewModel vm) { _vm = vm; }
+            public UnitConverterVMCallback(UnitConverterViewModel vm)
+            {
+                _vm = new WeakReference<UnitConverterViewModel>(vm);
+            }
+
+            private UnitConverterViewModel ViewModel =>
+                _vm.TryGetTarget(out UnitConverterViewModel vm) ? vm : null;
 
             protected override void DisplayCallback(string fromValue, string toValue)
             {
-                _vm.RunOnUIThread(() => _vm.UpdateDisplay(fromValue, toValue));
+                UnitConverterViewModel vm = ViewModel;
+                vm?.RunOnUIThread(() => vm.UpdateDisplay(fromValue, toValue));
             }
 
             protected override void SuggestedValueCallback(CalcManager.Interop.SuggestedValueWrapper[] suggestedValues)
             {
-                var converted = new List<(string Value, int UnitId)>();
+                UnitConverterViewModel vm = ViewModel;
+                if (vm == null)
+                {
+                    return;
+                }
+
+                var converted = new List<(string Value, CalcManager.Interop.UnitWrapper Unit)>();
                 if (suggestedValues != null)
                 {
                     foreach (var sv in suggestedValues)
                     {
-                        converted.Add((sv.Value, sv.Unit.Id));
+                        converted.Add((sv.Value, sv.Unit));
                     }
                 }
-                _vm.RunOnUIThread(() => _vm.UpdateSupplementaryResults(converted));
+                vm.RunOnUIThread(() => vm.UpdateSupplementaryResults(converted));
             }
 
             protected override void MaxDigitsReached()
             {
-                _vm.RunOnUIThread(() => _vm.OnMaxDigitsReached());
+                UnitConverterViewModel vm = ViewModel;
+                vm?.RunOnUIThread(() => vm.OnMaxDigitsReached());
             }
         }
 
         private sealed class CurrencyVMCallback : DataLoaders.IViewModelCurrencyCallback
         {
-            private readonly UnitConverterViewModel _vm;
+            // Weak for the same reason as UnitConverterVMCallback: the currency loader is reachable
+            // from the native data-loader bridge, so a strong reference here would root the view
+            // model through the interop boundary too.
+            private readonly WeakReference<UnitConverterViewModel> _vm;
 
-            public CurrencyVMCallback(UnitConverterViewModel vm) { _vm = vm; }
+            public CurrencyVMCallback(UnitConverterViewModel vm)
+            {
+                _vm = new WeakReference<UnitConverterViewModel>(vm);
+            }
+
+            private UnitConverterViewModel ViewModel =>
+                _vm.TryGetTarget(out UnitConverterViewModel vm) ? vm : null;
 
             public void CurrencyDataLoadFinished(bool didLoad)
             {
-                _vm.RunOnUIThread(() => _vm.OnCurrencyDataLoadFinished(didLoad));
+                UnitConverterViewModel vm = ViewModel;
+                vm?.RunOnUIThread(() => vm.OnCurrencyDataLoadFinished(didLoad));
             }
 
             public void CurrencyTimestampUpdated(string timestamp, bool isWeekOld)
             {
-                _vm.RunOnUIThread(() => _vm.OnCurrencyTimestampUpdated(timestamp, isWeekOld));
+                UnitConverterViewModel vm = ViewModel;
+                vm?.RunOnUIThread(() => vm.OnCurrencyTimestampUpdated(timestamp, isWeekOld));
             }
 
             public void NetworkBehaviorChanged(NetworkAccessBehavior newBehavior)
             {
-                _vm.RunOnUIThread(() => _vm.HandleNetworkBehaviorChanged(newBehavior));
+                UnitConverterViewModel vm = ViewModel;
+                vm?.RunOnUIThread(() => vm.HandleNetworkBehaviorChanged(newBehavior));
             }
         }
 
@@ -1201,14 +1494,27 @@ namespace CalculatorApp.ViewModel
         internal void OnCurrencyDataLoadFinished(bool didLoad)
         {
             _isCurrencyDataLoaded = true;
-            CurrencyDataLoadFailed = !didLoad;
-            IsCurrencyLoadingVisible = false;
-
-            if (didLoad && IsCurrencyCurrentCategory)
+            try
             {
-                _model.ResetCategoriesAndRatios();
-                _model.Calculate();
-                ResetCategory();
+                if (didLoad && IsCurrencyCurrentCategory)
+                {
+                    lock (_modelLock)
+                    {
+                        _model.Calculate();
+                        ResetCategory();
+                    }
+                }
+            }
+            finally
+            {
+                try
+                {
+                    IsCurrencyLoadingVisible = false;
+                }
+                finally
+                {
+                    CurrencyDataLoadFailed = !didLoad;
+                }
             }
 
             string key = didLoad ? "CurrencyRatesUpdated" : "CurrencyRatesUpdateFailed";

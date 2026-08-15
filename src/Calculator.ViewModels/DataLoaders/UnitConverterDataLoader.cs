@@ -782,14 +782,21 @@ namespace CalculatorApp.ViewModel.DataLoaders
                 var result = new UnitWrapper[currencyUnits.Count];
                 for (int i = 0; i < currencyUnits.Count; i++)
                 {
-                    var cu = currencyUnits[i];
-                    result[i] = new UnitWrapper { Id = cu.Id, Name = cu.Name, Abbreviation = cu.Abbreviation, AccessibleName = cu.CountryName };
+                    result[i] = CreateCurrencyUnitWrapper(currencyUnits[i]);
                 }
                 return result;
             }
 
             return Array.Empty<UnitWrapper>();
         }
+
+        /// <summary>
+        /// Returns the ordered units for a category without changing any selection or converter
+        /// state. Reads the data prebuilt by LoadData (currency delegates to CurrencyDataLoader and
+        /// is empty until currency data has loaded). Used by the unit picker to enumerate every
+        /// category's units for cross-category search.
+        /// </summary>
+        public UnitWrapper[] GetUnitsForCategory(CategoryWrapper category) => GetOrderedUnits(category);
 
         protected override UnitConversionEntry[] LoadOrderedRatios(UnitWrapper unit)
         {
@@ -818,7 +825,7 @@ namespace CalculatorApp.ViewModel.DataLoaders
                         {
                             entries.Add(new UnitConversionEntry
                             {
-                                Unit = new UnitWrapper { Id = targetUnit.Id, Name = targetUnit.Name, Abbreviation = targetUnit.Abbreviation, AccessibleName = targetUnit.CountryName },
+                                Unit = CreateCurrencyUnitWrapper(targetUnit),
                                 Ratio = kvp.Value.Ratio,
                                 Offset = kvp.Value.Offset,
                                 OffsetFirst = kvp.Value.OffsetFirst,
@@ -830,6 +837,26 @@ namespace CalculatorApp.ViewModel.DataLoaders
             }
 
             return Array.Empty<UnitConversionEntry>();
+        }
+
+        internal static UnitWrapper CreateCurrencyUnitWrapper(CurrencyUnit currencyUnit)
+        {
+            if (currencyUnit == null)
+            {
+                throw new ArgumentNullException(nameof(currencyUnit));
+            }
+
+            string firstName = currencyUnit.IsRtlLanguage ? currencyUnit.Name : currencyUnit.CountryName;
+            string secondName = currencyUnit.IsRtlLanguage ? currencyUnit.CountryName : currencyUnit.Name;
+            return new UnitWrapper
+            {
+                Id = currencyUnit.Id,
+                Name = firstName + " - " + secondName,
+                AccessibleName = firstName + " " + secondName,
+                Abbreviation = currencyUnit.Abbreviation,
+                IsConversionSource = currencyUnit.IsConversionSource,
+                IsConversionTarget = currencyUnit.IsConversionTarget,
+            };
         }
 
         protected override bool SupportsCategory(CategoryWrapper target)

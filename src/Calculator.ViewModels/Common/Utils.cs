@@ -15,9 +15,7 @@ using Windows.UI.Xaml.Media;
 namespace CalculatorApp.ViewModel.Common
 {
     /// <summary>
-    /// General utility methods. C# port of Utils.h/cpp.
-    /// Note: The C++ OBSERVABLE_OBJECT, OBSERVABLE_PROPERTY_RW, and OBSERVABLE_PROPERTY_R macros
-    /// are not needed in C# since INotifyPropertyChanged is used directly.
+    /// General utility methods shared across the view models.
     /// </summary>
     public static class Utils
     {
@@ -112,7 +110,7 @@ namespace CalculatorApp.ViewModel.Common
     }
 
     /// <summary>
-    /// Public WinRT-visible utility class. Port of the C++/CX Utilities ref class.
+    /// Utility methods that need to be reachable from XAML and from the projection.
     /// </summary>
     public sealed class Utilities
     {

@@ -99,6 +99,9 @@
   <PropertyGroup>
     <RestoreProjectStyle>PackageReference</RestoreProjectStyle>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(IsStoreBuild)' == 'True'">
+    <DefineConstants>$(DefineConstants);SEND_DIAGNOSTICS</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <Compile Include="TraceLoggingCommon.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

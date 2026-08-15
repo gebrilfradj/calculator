@@ -147,7 +147,6 @@
     <Compile Include="Utils\DeflateUtils.cs" />
     <Compile Include="Utils\ResourceVirtualKey.cs" />
     <Compile Include="Utils\ResourceString.cs" />
-    <Compile Include="Utils\JsonUtils.cs" />
     <Compile Include="Utils\ThemeHelper.cs" />
     <Compile Include="Views\GraphingCalculator\EquationStylePanelControl.xaml.cs">
       <DependentUpon>EquationStylePanelControl.xaml</DependentUpon>

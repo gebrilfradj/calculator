@@ -19,14 +19,57 @@ namespace CalculatorApp.ViewModel.Common
     {
         public event NetworkBehaviorChangedHandler NetworkBehaviorChanged;
 
+        private NetworkStatusChangedEventHandler _networkStatusChangedHandler;
+        private readonly Action<NetworkStatusChangedEventHandler> _unsubscribe;
+
         public NetworkManager()
+            : this(
+                handler => NetworkInformation.NetworkStatusChanged += handler,
+                handler => NetworkInformation.NetworkStatusChanged -= handler)
         {
-            NetworkInformation.NetworkStatusChanged += OnNetworkStatusChange;
+        }
+
+        internal NetworkManager(
+            Action<NetworkStatusChangedEventHandler> subscribe,
+            Action<NetworkStatusChangedEventHandler> unsubscribe)
+        {
+            if (subscribe == null) throw new ArgumentNullException(nameof(subscribe));
+            _unsubscribe = unsubscribe ?? throw new ArgumentNullException(nameof(unsubscribe));
+
+            // A static event must not strongly root its manager.
+            var weakThis = new WeakReference<NetworkManager>(this);
+            NetworkStatusChangedEventHandler handler = null;
+            handler = sender =>
+            {
+                if (weakThis.TryGetTarget(out NetworkManager self))
+                {
+                    self.OnNetworkStatusChange(sender);
+                }
+                else
+                {
+                    unsubscribe(handler);
+                }
+            };
+
+            _networkStatusChangedHandler = handler;
+            subscribe(handler);
         }
 
         ~NetworkManager()
         {
-            NetworkInformation.NetworkStatusChanged -= OnNetworkStatusChange;
+            // Finalizer exceptions terminate the process.
+            try
+            {
+                NetworkStatusChangedEventHandler handler = _networkStatusChangedHandler;
+                _networkStatusChangedHandler = null;
+                if (handler != null)
+                {
+                    _unsubscribe(handler);
+                }
+            }
+            catch (Exception)
+            {
+            }
         }
 
         public static NetworkAccessBehavior GetNetworkAccessBehavior()

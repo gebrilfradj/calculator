@@ -47,12 +47,8 @@ namespace CalculatorApp.ViewModel
             _yMax = string.Empty;
         }
 
-        #region Computed Properties
-
         public bool XError => !XMinError && !XMaxError && _xMinValue >= _xMaxValue;
         public bool YError => !YMinError && !YMaxError && _yMinValue >= _yMaxValue;
-
-        #endregion
 
         #region Range Properties
 
@@ -218,8 +214,6 @@ namespace CalculatorApp.ViewModel
 
         #endregion
 
-        #region Public Methods
-
         public void UpdateDisplayRange()
         {
             if (_dontUpdateDisplayRange) return;
@@ -252,8 +246,6 @@ namespace CalculatorApp.ViewModel
         {
             return XMinError || XMaxError || YMinError || YMaxError || XError || YError;
         }
-
-        #endregion
 
     }
 }

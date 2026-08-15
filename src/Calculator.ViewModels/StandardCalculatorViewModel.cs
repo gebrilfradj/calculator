@@ -229,8 +229,6 @@ namespace CalculatorApp.ViewModel
             AreProgrammerRadixOperatorsVisible = false;
         }
 
-        #region Observable Properties
-
         public HistoryViewModel HistoryVM
         {
             get => _historyVM;
@@ -399,10 +397,6 @@ namespace CalculatorApp.ViewModel
             private set => SetProperty(ref _openParenthesisCount, value);
         }
 
-        #endregion
-
-        #region Non-observable properties
-
         public bool IsOperandUpdatedUsingViewModel
         {
             get => _isOperandUpdatedUsingViewModel;
@@ -432,8 +426,6 @@ namespace CalculatorApp.ViewModel
             get => _selectedExpressionLastData;
             internal set => _selectedExpressionLastData = value;
         }
-
-        #endregion
 
         #region Mode properties
 
@@ -584,13 +576,81 @@ namespace CalculatorApp.ViewModel
 
         #region Snapshot property
 
+        // Null preserves the distinction between uncaptured and empty history.
+        private Snapshot.CalcManagerSnapshot CaptureCalcManagerSnapshot()
+        {
+            var result = new Snapshot.CalcManagerSnapshot();
+
+            HistoryItemWrapper[] items = _standardCalculatorManager?.GetHistoryItems();
+            if (items == null || items.Length == 0)
+            {
+                return result;
+            }
+
+            var captured = new List<Snapshot.CalcManagerHistoryItem>(items.Length);
+            foreach (HistoryItemWrapper item in items)
+            {
+                var historyItem = new Snapshot.CalcManagerHistoryItem
+                {
+                    Expression = item.Expression,
+                    Result = item.Result
+                };
+
+                foreach (HistoryToken token in item.Tokens)
+                {
+                    historyItem.Tokens.Add(new Snapshot.CalcManagerToken(token.Value, token.CommandIndex));
+                }
+
+                foreach (ExpressionCommandWrapper command in item.Commands)
+                {
+                    historyItem.Commands.Add(command);
+                }
+
+                captured.Add(historyItem);
+            }
+
+            result.HistoryItems = captured;
+            return result;
+        }
+
+        private void RestoreHistoryItems(Snapshot.CalcManagerSnapshot calcManagerSnapshot)
+        {
+            IList<Snapshot.CalcManagerHistoryItem> items = calcManagerSnapshot?.HistoryItems;
+            if (items == null || _standardCalculatorManager == null)
+            {
+                return;
+            }
+
+            var restored = new HistoryItemWrapper[items.Count];
+            for (int i = 0; i < items.Count; i++)
+            {
+                Snapshot.CalcManagerHistoryItem item = items[i];
+
+                var tokens = new HistoryToken[item.Tokens.Count];
+                for (int t = 0; t < item.Tokens.Count; t++)
+                {
+                    tokens[t] = new HistoryToken
+                    {
+                        Value = item.Tokens[t].OpCodeName,
+                        CommandIndex = item.Tokens[t].CommandIndex
+                    };
+                }
+
+                var commands = new ExpressionCommandWrapper[item.Commands.Count];
+                item.Commands.CopyTo(commands, 0);
+
+                restored[i] = new HistoryItemWrapper(tokens, commands, item.Expression, item.Result);
+            }
+
+            _standardCalculatorManager.SetHistoryItems(restored);
+        }
+
         public Snapshot.StandardCalculatorSnapshot Snapshot
         {
             get
             {
                 var result = new Snapshot.StandardCalculatorSnapshot();
-                // CalcManager snapshot not available via interop
-                result.CalcManager = new Snapshot.CalcManagerSnapshot();
+                result.CalcManager = CaptureCalcManagerSnapshot();
                 result.PrimaryDisplay = new Snapshot.PrimaryDisplaySnapshot(DisplayValue, _isInError);
                 if (_tokens != null && _tokens.Count > 0 && _commands != null && _commands.Count > 0)
                 {
@@ -614,7 +674,13 @@ namespace CalculatorApp.ViewModel
             set
             {
                 var snapshot = value ?? throw new ArgumentNullException(nameof(value));
-                _standardCalculatorManager?.Reset(false);
+
+                // Recall starts a separate session, including empty memory.
+                ViewMode mode = GetCalculatorMode();
+                _standardCalculatorManager?.Reset(true);
+                ResetManagedCalculatorSubmodes();
+                SetNativeCalculatorMode(mode);
+                RestoreHistoryItems(snapshot.CalcManager);
 
                 if (snapshot.ExpressionDisplay != null)
                 {
@@ -672,8 +738,6 @@ namespace CalculatorApp.ViewModel
 
         #endregion
 
-        #region Commands
-
         private RelayCommand<object> _copyCommand;
         private RelayCommand<object> _pasteCommand;
         private RelayCommand<object> _buttonPressedCommand;
@@ -694,10 +758,6 @@ namespace CalculatorApp.ViewModel
         public RelayCommand<object> MemoryItemPressed => MemoryItemPressedCommand;
         public RelayCommand<object> MemoryAdd => MemoryAddCommand;
         public RelayCommand<object> MemorySubtract => MemorySubtractCommand;
-
-        #endregion
-
-        #region Public methods
 
         public void UpdateOperand(int pos, string text)
         {
@@ -920,12 +980,62 @@ namespace CalculatorApp.ViewModel
             _standardCalculatorManager?.Reset(clearMemory);
         }
 
+        internal void ResetAfterFailedSnapshot(ViewMode mode)
+        {
+            _standardCalculatorManager?.Reset(true);
+            ResetManagedCalculatorSubmodes();
+            if (_standardCalculatorManager != null)
+            {
+                _standardCalculatorManager.SetStandardMode();
+                _standardCalculatorManager.ClearHistory();
+                _standardCalculatorManager.SetScientificMode();
+                _standardCalculatorManager.ClearHistory();
+            }
+            SetNativeCalculatorMode(mode);
+            HistoryVM.ClearItems();
+            SetExpressionDisplay(
+                new List<(string Token, int CommandIndex)>(),
+                new List<ExpressionCommandWrapper>());
+            SetPrimaryDisplay("0", false);
+            SetMemorizedNumbers(Array.Empty<string>());
+            SetCalculatorType(mode);
+        }
+
+        private void ResetManagedCalculatorSubmodes()
+        {
+            _currentAngleType = NumbersAndOperatorsEnum.Degree;
+            IsFToEChecked = false;
+            IsShiftProgrammerChecked = false;
+            IsBitFlipChecked = false;
+            if (_valueBitLength != BitLength.BitLengthQWord)
+            {
+                _valueBitLength = BitLength.BitLengthQWord;
+                OnPropertyChanged(nameof(ValueBitLength));
+            }
+            CurrentRadixType = NumberBase.DecBase;
+            AreHEXButtonsEnabled = false;
+        }
+
+        private void SetNativeCalculatorMode(ViewMode mode)
+        {
+            switch (mode)
+            {
+                case ViewMode.Standard:
+                    _standardCalculatorManager?.SetStandardMode();
+                    break;
+                case ViewMode.Scientific:
+                    _standardCalculatorManager?.SetScientificMode();
+                    break;
+                case ViewMode.Programmer:
+                    _standardCalculatorManager?.SetProgrammerMode();
+                    break;
+            }
+        }
+
         public void SendCommandToCalcManager(int command)
         {
             _standardCalculatorManager?.SendCommand((CalculatorCommand)command);
         }
-
-        #endregion
 
         #region Internal callback methods (called by CalculatorDisplay)
 
@@ -1092,8 +1202,6 @@ namespace CalculatorApp.ViewModel
         }
 
         #endregion
-
-        #region Private methods
 
         private string LocalizeDisplayValue(string displayValue)
         {
@@ -1290,25 +1398,13 @@ namespace CalculatorApp.ViewModel
 
         private void OnButtonPressed(object parameter)
         {
-            NumbersAndOperatorsEnum numOpEnum;
-            if (parameter is CalculatorButtonPressedEventArgs eventArgs)
-            {
-                numOpEnum = eventArgs.Operation;
-            }
-            else if (parameter is int intVal)
-            {
-                numOpEnum = (NumbersAndOperatorsEnum)intVal;
-            }
-            else if (parameter != null)
-            {
-                numOpEnum = (NumbersAndOperatorsEnum)parameter;
-            }
-            else
+            if (parameter == null)
             {
                 return;
             }
-            _feedbackForButtonPress = numOpEnum.ToString();
-            OnButtonPressed(numOpEnum);
+
+            _feedbackForButtonPress = CalculatorButtonPressedEventArgs.GetAuditoryFeedbackFromCommandParameter(parameter);
+            OnButtonPressed(CalculatorButtonPressedEventArgs.GetOperationFromCommandParameter(parameter));
         }
 
         private void OnButtonPressed(NumbersAndOperatorsEnum numOpEnum)
@@ -1959,7 +2055,6 @@ namespace CalculatorApp.ViewModel
             return commands;
         }
 
-        #endregion
     }
 
 }

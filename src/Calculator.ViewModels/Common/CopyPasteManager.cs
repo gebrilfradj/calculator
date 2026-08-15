@@ -37,8 +37,8 @@ namespace CalculatorApp.ViewModel.Common
         private static readonly string c_wspcLParens = c_wspc + @"[(]*" + c_wspc;
         private static readonly string c_wspcLParenSigned = c_wspc + @"([-+]?[(])*" + c_wspc;
         private static readonly string c_wspcRParens = c_wspc + @"[)]*" + c_wspc;
-        private static readonly string c_signedDecFloat = @"(?:[-+]?(?:\d+(\.\d*)?|\.\d+))";
-        private static readonly string c_optionalENotation = @"(?:e[+-]?\d+)?";
+        private static readonly string c_signedDecFloat = @"(?:[-+]?(?:[0-9]+(\.[0-9]*)?|\.[0-9]+))";
+        private static readonly string c_optionalENotation = @"(?:e[+-]?[0-9]+)?";
 
         // Programmer Mode Integer patterns
         private static readonly string c_hexProgrammerChars = @"([a-f]|[A-F]|\d)+((_|'|`)([a-f]|[A-F]|\d)+)*";
@@ -49,12 +49,12 @@ namespace CalculatorApp.ViewModel.Common
 
         private static readonly Regex[] s_standardModePatterns = new[]
         {
-            new Regex("^" + c_wspc + c_signedDecFloat + c_optionalENotation + c_wspc + "$")
+            FullMatch(c_wspc + c_signedDecFloat + c_optionalENotation + c_wspc)
         };
 
         private static readonly Regex[] s_scientificModePatterns = new[]
         {
-            new Regex("^(" + c_wspc + @"[-+]?)|(" + c_wspcLParenSigned + ")" + c_signedDecFloat + c_optionalENotation + c_wspcRParens + "$")
+            FullMatch("(" + c_wspc + @"[-+]?)|(" + c_wspcLParenSigned + ")" + c_signedDecFloat + c_optionalENotation + c_wspcRParens)
         };
 
         private static readonly Regex[][] s_programmerModePatterns = new[]
@@ -62,32 +62,37 @@ namespace CalculatorApp.ViewModel.Common
             // Hex
             new[]
             {
-                new Regex("^" + c_wspcLParens + "(0[xX])?" + c_hexProgrammerChars + c_uIntSuffixes + c_wspcRParens + "$"),
-                new Regex("^" + c_wspcLParens + c_hexProgrammerChars + "[hH]?" + c_wspcRParens + "$")
+                FullMatch(c_wspcLParens + "(0[xX])?" + c_hexProgrammerChars + c_uIntSuffixes + c_wspcRParens),
+                FullMatch(c_wspcLParens + c_hexProgrammerChars + "[hH]?" + c_wspcRParens)
             },
             // Dec
             new[]
             {
-                new Regex("^" + c_wspcLParens + @"[-+]?" + c_decProgrammerChars + @"[lL]{0,2}" + c_wspcRParens + "$"),
-                new Regex("^" + c_wspcLParens + "(0[nN])?" + c_decProgrammerChars + c_uIntSuffixes + c_wspcRParens + "$")
+                FullMatch(c_wspcLParens + @"[-+]?" + c_decProgrammerChars + @"[lL]{0,2}" + c_wspcRParens),
+                FullMatch(c_wspcLParens + "(0[nN])?" + c_decProgrammerChars + c_uIntSuffixes + c_wspcRParens)
             },
             // Oct
             new[]
             {
-                new Regex("^" + c_wspcLParens + "(0[otOT])?" + c_octProgrammerChars + c_uIntSuffixes + c_wspcRParens + "$")
+                FullMatch(c_wspcLParens + "(0[otOT])?" + c_octProgrammerChars + c_uIntSuffixes + c_wspcRParens)
             },
             // Bin
             new[]
             {
-                new Regex("^" + c_wspcLParens + "(0[byBY])?" + c_binProgrammerChars + c_uIntSuffixes + c_wspcRParens + "$"),
-                new Regex("^" + c_wspcLParens + c_binProgrammerChars + "[bB]?" + c_wspcRParens + "$")
+                FullMatch(c_wspcLParens + "(0[byBY])?" + c_binProgrammerChars + c_uIntSuffixes + c_wspcRParens),
+                FullMatch(c_wspcLParens + c_binProgrammerChars + "[bB]?" + c_wspcRParens)
             }
         };
 
         private static readonly Regex[] s_unitConverterPatterns = new[]
         {
-            new Regex("^" + c_wspc + c_signedDecFloat + c_wspc + "$")
+            FullMatch(c_wspc + c_signedDecFloat + c_wspc)
         };
+
+        private static Regex FullMatch(string pattern)
+        {
+            return new Regex(@"\A(?:" + pattern + @")\z");
+        }
 
         public static uint MaxPasteableLength => MaxPasteableLengthValue;
         public static uint MaxOperandCount => MaxOperandCountValue;
@@ -147,19 +152,20 @@ namespace CalculatorApp.ViewModel.Common
                 return PasteErrorString;
             }
 
-            // Get english translated expression
             string englishString = LocalizationSettings.GetInstance().GetEnglishValueFromLocalizedDigits(pastedText);
 
-            // Remove spaces, comma separator from the pasteExpression
             string pasteExpression = RemoveUnwantedCharsFromString(englishString);
 
-            // If the last character is an = sign, remove it
             if (pasteExpression.Length > 0 && pasteExpression[pasteExpression.Length - 1] == '=')
             {
                 pasteExpression = pasteExpression.Substring(0, pasteExpression.Length - 1);
             }
 
-            // Extract operands from the expression
+            if (mode == ViewMode.Scientific && !pasteExpression.Any(ch => ch >= '0' && ch <= '9'))
+            {
+                return PasteErrorString;
+            }
+
             var operands = ExtractOperands(pasteExpression, mode);
             if (operands.Count == 0)
             {
@@ -172,7 +178,6 @@ namespace CalculatorApp.ViewModel.Common
                 operands.Add(pasteExpression);
             }
 
-            // Validate each operand with patterns for different modes
             if (!ExpressionRegExMatch(operands, mode, modeType, programmerNumberBase, bitLengthType))
             {
                 TraceLogger.GetInstance().LogError(mode, "CopyPasteManager::ValidatePasteExpression", "InvalidExpressionForPresentMode");
@@ -455,18 +460,60 @@ namespace CalculatorApp.ViewModel.Common
                 default: intBase = 10; break;
             }
 
-            try
+            return TryParseLeadingDigits(operand, intBase);
+        }
+
+        private static ulong? TryParseLeadingDigits(string operand, int intBase)
+        {
+            int index = 0;
+            while (index < operand.Length && char.IsWhiteSpace(operand[index]))
             {
-                return Convert.ToUInt64(operand, intBase);
+                index++;
             }
-            catch (FormatException)
+
+            if (index + 1 < operand.Length && operand[index] == '0')
             {
-                return null;
+                char prefix = char.ToUpperInvariant(operand[index + 1]);
+                bool hasRadixPrefix = intBase == 16 && prefix == 'X'
+                    || intBase == 10 && prefix == 'N'
+                    || intBase == 8 && (prefix == 'O' || prefix == 'T')
+                    || intBase == 2 && (prefix == 'B' || prefix == 'Y');
+                int firstDigit = index + 2 < operand.Length ? HexValue(operand[index + 2]) : -1;
+                if (hasRadixPrefix && firstDigit >= 0 && firstDigit < intBase)
+                {
+                    index += 2;
+                }
             }
-            catch (OverflowException)
+
+            ulong value = 0;
+            int digitCount = 0;
+            for (; index < operand.Length; index++, digitCount++)
             {
-                return null;
+                int digit = HexValue(operand[index]);
+                if (digit < 0 || digit >= intBase)
+                {
+                    break;
+                }
+
+                try
+                {
+                    value = checked((value * (ulong)intBase) + (ulong)digit);
+                }
+                catch (OverflowException)
+                {
+                    return null;
+                }
             }
+
+            return digitCount == 0 ? (ulong?)null : value;
+        }
+
+        private static int HexValue(char c)
+        {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return -1;
         }
 
         public static uint OperandLength(string operand, ViewMode mode, CategoryGroupType modeType, NumberBase programmerNumberBase)

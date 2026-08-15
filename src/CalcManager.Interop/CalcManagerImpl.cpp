@@ -8,6 +8,21 @@
 
 namespace winrt::CalcManager::Interop::implementation
 {
+    namespace
+    {
+        com_array<CalcManager::Interop::HistoryItemWrapper> WrapHistoryItems(
+            std::vector<std::shared_ptr<CalculationManager::HISTORYITEM>> const& items)
+        {
+            std::vector<CalcManager::Interop::HistoryItemWrapper> result;
+            result.reserve(items.size());
+            for (auto const& item : items)
+            {
+                result.push_back(winrt::make<HistoryItemWrapper>(item));
+            }
+            return com_array<CalcManager::Interop::HistoryItemWrapper>(std::move(result));
+        }
+    }
+
     // ---- CalcDisplayBridge ----
 
     CalcDisplayBridge::CalcDisplayBridge(
@@ -265,14 +280,24 @@ namespace winrt::CalcManager::Interop::implementation
 
     com_array<CalcManager::Interop::HistoryItemWrapper> CalculatorManagerWrapper::GetHistoryItems()
     {
-        auto const& items = m_manager->GetHistoryItems();
-        std::vector<CalcManager::Interop::HistoryItemWrapper> result;
-        result.reserve(items.size());
-        for (auto const& item : items)
+        return WrapHistoryItems(m_manager->GetHistoryItems());
+    }
+
+    com_array<CalcManager::Interop::HistoryItemWrapper> CalculatorManagerWrapper::GetHistoryItemsForMode(CalcManager::Interop::CalculatorMode mode)
+    {
+        return WrapHistoryItems(m_manager->GetHistoryItems(static_cast<CalculationManager::CalculatorMode>(static_cast<int>(mode))));
+    }
+
+    void CalculatorManagerWrapper::SetHistoryItems(array_view<CalcManager::Interop::HistoryItemWrapper const> historyItems)
+    {
+        std::vector<std::shared_ptr<CalculationManager::HISTORYITEM>> nativeItems;
+        nativeItems.reserve(historyItems.size());
+        for (auto const& item : historyItems)
         {
-            result.push_back(winrt::make<HistoryItemWrapper>(item));
+            nativeItems.push_back(get_self<HistoryItemWrapper>(item)->ToUnderlying());
         }
-        return com_array<CalcManager::Interop::HistoryItemWrapper>(std::move(result));
+
+        m_manager->SetHistoryItems(nativeItems);
     }
 
     CalcManager::Interop::HistoryItemWrapper CalculatorManagerWrapper::GetHistoryItem(uint32_t index)

@@ -90,7 +90,6 @@ namespace CalculatorApp.ViewModel.Common
         private readonly List<ButtonLog> _buttonLog = new List<ButtonLog>();
         private readonly List<int> _windowIdLog = new List<int>();
         private readonly object _lock = new object();
-        private ulong _currentWindowCount;
 
         private TraceLogger()
         {
@@ -127,7 +126,6 @@ namespace CalculatorApp.ViewModel.Common
 
             var fields = new LoggingFields();
             fields.AddString(CalcMode, NavCategoryStates.GetFriendlyName(mode));
-            fields.AddUInt64("NumOfOpenWindows", _currentWindowCount);
             LogLevel2Event(EventNameWindowOnCreated, fields);
         }
 
@@ -256,21 +254,6 @@ namespace CalculatorApp.ViewModel.Common
             }
         }
 
-        public void UpdateWindowCount(ulong windowCount)
-        {
-            if (windowCount == 0)
-            {
-                _currentWindowCount--;
-                return;
-            }
-            _currentWindowCount = windowCount;
-        }
-
-        public void DecreaseWindowCount()
-        {
-            _currentWindowCount = 0;
-        }
-
         public void LogDateCalculationModeUsed(bool addSubtractMode)
         {
             string calculationType = addSubtractMode ? "AddSubtractMode" : "DateDifferenceMode";
@@ -383,44 +366,7 @@ namespace CalculatorApp.ViewModel.Common
 
         private void LogLevel2Event(string eventName, LoggingFields fields)
         {
-            // Use TraceLoggingCommon if available, otherwise use LoggingChannel
-            try
-            {
-                TraceLoggingCommon.GetInstance()?.LogLevel2Event(eventName, fields);
-            }
-            catch
-            {
-                // Silently ignore trace logging failures
-            }
-        }
-    }
-
-    /// <summary>
-    /// Wrapper for TraceLogging infrastructure. In the managed port, this uses the Windows.Foundation.Diagnostics
-    /// logging channel.
-    /// </summary>
-    internal sealed class TraceLoggingCommon
-    {
-        private static TraceLoggingCommon s_instance;
-        private readonly LoggingChannel _channel;
-
-        private TraceLoggingCommon()
-        {
-            _channel = new LoggingChannel("CalculatorApp", null, new Guid("1d9dda64-be84-57c4-8154-e01299f79f4a"));
-        }
-
-        public static TraceLoggingCommon GetInstance()
-        {
-            if (s_instance == null)
-            {
-                s_instance = new TraceLoggingCommon();
-            }
-            return s_instance;
-        }
-
-        public void LogLevel2Event(string eventName, LoggingFields fields)
-        {
-            _channel.LogEvent(eventName, fields, LoggingLevel.Verbose);
+            TraceLogging.TraceLoggingCommon.GetInstance().LogLevel2Event(eventName, fields);
         }
     }
 }
