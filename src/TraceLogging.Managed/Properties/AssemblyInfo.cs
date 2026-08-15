@@ -1,8 +1,8 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-[assembly: AssemblyTitle("Calculator.ManagedViewModels")]
+[assembly: AssemblyTitle("TraceLogging.Managed")]
 [assembly: AssemblyCompany("Microsoft Corporation")]
 [assembly: AssemblyProduct("Microsoft Windows Calculator")]
-[assembly: AssemblyCopyright("Copyright ©  2026")]
+[assembly: AssemblyCopyright("Copyright \u00a9  2026")]
 [assembly: ComVisible(false)]
