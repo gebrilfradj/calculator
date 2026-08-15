@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.ComponentModel;
+using System.Globalization;
 using CalculatorApp.ViewModel.Common;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -10,6 +11,11 @@ namespace CalculatorApp.ViewModel
     [Windows.UI.Xaml.Data.Bindable]
     public sealed partial class GraphingSettingsViewModel : ObservableObject
     {
+        private const int InvalidTrigUnit = 0;
+        private const int RadiansTrigUnit = 1;
+        private const int DegreesTrigUnit = 2;
+        private const int GradiansTrigUnit = 3;
+
         private string _xMin;
         private string _xMax;
         private string _yMin;
@@ -65,7 +71,10 @@ namespace CalculatorApp.ViewModel
                 {
                     _xMinValue = number;
                     XMinError = false;
-                    // _graph?.SetXAxisMin(number);
+                    if (Graph != null)
+                    {
+                        Graph.XAxisMin = number;
+                    }
                 }
                 else
                 {
@@ -91,6 +100,10 @@ namespace CalculatorApp.ViewModel
                 {
                     _xMaxValue = number;
                     XMaxError = false;
+                    if (Graph != null)
+                    {
+                        Graph.XAxisMax = number;
+                    }
                 }
                 else
                 {
@@ -116,6 +129,10 @@ namespace CalculatorApp.ViewModel
                 {
                     _yMinValue = number;
                     YMinError = false;
+                    if (Graph != null)
+                    {
+                        Graph.YAxisMin = number;
+                    }
                 }
                 else
                 {
@@ -141,6 +158,10 @@ namespace CalculatorApp.ViewModel
                 {
                     _yMaxValue = number;
                     YMaxError = false;
+                    if (Graph != null)
+                    {
+                        Graph.YAxisMax = number;
+                    }
                 }
                 else
                 {
@@ -159,21 +180,27 @@ namespace CalculatorApp.ViewModel
 
         public int TrigUnit
         {
-            get => 0; // Default: would query _graph.TrigUnitMode
+            get => Graph == null ? InvalidTrigUnit : Graph.TrigUnitMode;
             set
             {
-                // Would set _graph.TrigUnitMode = value
+                if (Graph == null)
+                {
+                    return;
+                }
+
+                Graph.TrigUnitMode = value;
                 OnPropertyChanged(nameof(TrigUnit));
             }
         }
 
         public bool TrigModeRadians
         {
-            get => false; // Would check _graph.TrigUnitMode == Radians
+            get => Graph != null && Graph.TrigUnitMode == RadiansTrigUnit;
             set
             {
-                if (value)
+                if (value && Graph != null && Graph.TrigUnitMode != RadiansTrigUnit)
                 {
+                    Graph.TrigUnitMode = RadiansTrigUnit;
                     OnPropertyChanged(nameof(TrigModeRadians));
                     OnPropertyChanged(nameof(TrigModeDegrees));
                     OnPropertyChanged(nameof(TrigModeGradians));
@@ -184,11 +211,12 @@ namespace CalculatorApp.ViewModel
 
         public bool TrigModeDegrees
         {
-            get => false;
+            get => Graph != null && Graph.TrigUnitMode == DegreesTrigUnit;
             set
             {
-                if (value)
+                if (value && Graph != null && Graph.TrigUnitMode != DegreesTrigUnit)
                 {
+                    Graph.TrigUnitMode = DegreesTrigUnit;
                     OnPropertyChanged(nameof(TrigModeDegrees));
                     OnPropertyChanged(nameof(TrigModeRadians));
                     OnPropertyChanged(nameof(TrigModeGradians));
@@ -199,11 +227,12 @@ namespace CalculatorApp.ViewModel
 
         public bool TrigModeGradians
         {
-            get => false;
+            get => Graph != null && Graph.TrigUnitMode == GradiansTrigUnit;
             set
             {
-                if (value)
+                if (value && Graph != null && Graph.TrigUnitMode != GradiansTrigUnit)
                 {
+                    Graph.TrigUnitMode = GradiansTrigUnit;
                     OnPropertyChanged(nameof(TrigModeGradians));
                     OnPropertyChanged(nameof(TrigModeDegrees));
                     OnPropertyChanged(nameof(TrigModeRadians));
@@ -216,30 +245,76 @@ namespace CalculatorApp.ViewModel
 
         public void UpdateDisplayRange()
         {
-            if (_dontUpdateDisplayRange) return;
-            // Update the graph display range
+            if (Graph == null || _dontUpdateDisplayRange || HasError())
+            {
+                return;
+            }
+
+            Graph.SetDisplayRanges(_xMinValue, _xMaxValue, _yMinValue, _yMaxValue);
+            TraceLogger.GetInstance().LogGraphSettingsChanged(Common.GraphSettingsType.Grid, string.Empty);
         }
 
         public void SetGrapher(GraphControl.Grapher grapher)
         {
+            if (grapher != null && grapher.TrigUnitMode == InvalidTrigUnit)
+            {
+                grapher.TrigUnitMode = RadiansTrigUnit;
+            }
+
             Graph = grapher;
             InitRanges();
+            OnPropertyChanged(nameof(TrigUnit));
+            OnPropertyChanged(nameof(TrigModeRadians));
+            OnPropertyChanged(nameof(TrigModeDegrees));
+            OnPropertyChanged(nameof(TrigModeGradians));
         }
 
         public void InitRanges()
         {
+            double xMin = 0;
+            double xMax = 0;
+            double yMin = 0;
+            double yMax = 0;
+            if (Graph != null)
+            {
+                Graph.GetDisplayRanges(out xMin, out xMax, out yMin, out yMax);
+            }
+
             _dontUpdateDisplayRange = true;
-            // Initialize ranges from graph
-            // XMin = ...; XMax = ...; YMin = ...; YMax = ...;
+            _xMinValue = xMin;
+            _xMaxValue = xMax;
+            _yMinValue = yMin;
+            _yMaxValue = yMax;
+
+            XMin = xMin.ToString(CultureInfo.CurrentCulture);
+            XMax = xMax.ToString(CultureInfo.CurrentCulture);
+            YMin = yMin.ToString(CultureInfo.CurrentCulture);
+            YMax = yMax.ToString(CultureInfo.CurrentCulture);
             _dontUpdateDisplayRange = false;
         }
 
         public void ResetView()
         {
+            if (Graph == null)
+            {
+                return;
+            }
+
             _dontUpdateDisplayRange = true;
-            // Reset to default ranges
+            Graph.ResetGrid();
+            InitRanges();
+            XMinError = false;
+            XMaxError = false;
+            YMinError = false;
+            YMaxError = false;
             _dontUpdateDisplayRange = false;
-            UpdateDisplayRange();
+
+            OnPropertyChanged(nameof(XError));
+            OnPropertyChanged(nameof(XMin));
+            OnPropertyChanged(nameof(XMax));
+            OnPropertyChanged(nameof(YError));
+            OnPropertyChanged(nameof(YMin));
+            OnPropertyChanged(nameof(YMax));
         }
 
         public bool HasError()

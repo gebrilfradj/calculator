@@ -189,6 +189,22 @@ namespace Calculator.Tests
         }
 
         [TestMethod]
+        public void ConversionResultNarrationSubstitutesAllPlaceholders()
+        {
+            var viewModel = new UnitConverterViewModel();
+
+            string result = viewModel.GetLocalizedConversionResultStringFormat(
+                "1", "meter", "3.28", "feet");
+
+            Assert.IsFalse(result.Contains("%1"));
+            Assert.IsFalse(result.Contains("%2"));
+            Assert.IsFalse(result.Contains("%3"));
+            Assert.IsFalse(result.Contains("%4"));
+            StringAssert.Contains(result, "meter");
+            StringAssert.Contains(result, "feet");
+        }
+
+        [TestMethod]
         public void SwitchingActiveValueSwapsTheFromAndToAutomationFormats()
         {
             var viewModel = new UnitConverterViewModel();
@@ -420,6 +436,34 @@ namespace Calculator.Tests
             Assert.AreEqual(string.Empty, viewModel.CurrencySymbol2);
             Assert.AreEqual(Visibility.Collapsed, viewModel.CurrencySymbolVisibility);
             Assert.AreEqual(string.Empty, viewModel.CurrencyRatioEquality);
+        }
+
+        [TestMethod]
+        public async Task CurrencyRefreshCompletesAfterInitialLoad()
+        {
+            var viewModel = new UnitConverterViewModel();
+            await WaitForCurrencyLoadAsync(viewModel);
+            viewModel.OnCurrencyTimestampUpdated("stale timestamp", isWeekOld: true);
+
+            await viewModel.RefreshCurrencyRatiosAsync();
+
+            Assert.IsTrue(viewModel.IsCurrencyDataLoaded);
+            Assert.IsFalse(viewModel.IsCurrencyLoadingVisible);
+            Assert.IsFalse(viewModel.CurrencyDataLoadFailed);
+            Assert.AreNotEqual("stale timestamp", viewModel.CurrencyTimestamp);
+        }
+
+        [TestMethod]
+        public async Task LocaleDefaultCurrencyMapIsPackaged()
+        {
+            var file = await Windows.Storage.StorageFile.GetFileFromApplicationUriAsync(
+                new Uri("ms-appx:///DataLoaders/DefaultFromToCurrency.json"));
+            string json = await Windows.Storage.FileIO.ReadTextAsync(file);
+
+            StringAssert.Contains(json, "\"en-GB\"");
+            StringAssert.Contains(json, "\"GBP\"");
+            StringAssert.Contains(json, "\"en-CA\"");
+            StringAssert.Contains(json, "\"CAD\"");
         }
 
         [TestMethod]

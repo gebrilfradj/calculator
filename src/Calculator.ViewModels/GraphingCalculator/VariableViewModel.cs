@@ -18,12 +18,6 @@ namespace CalculatorApp.ViewModel
         [ObservableProperty]
         private bool _sliderSettingsVisible;
 
-        // Internal state for variable values (used when _variable is an opaque interop object)
-        private double _min;
-        private double _max;
-        private double _step;
-        private double _value;
-
         public event System.EventHandler<VariableChangedEventArgs> VariableUpdated;
 
         public VariableViewModel(string name, GraphControl.Variable variable)
@@ -31,12 +25,6 @@ namespace CalculatorApp.ViewModel
             _name = name;
             _variable = variable;
             _sliderSettingsVisible = false;
-
-            // Initialize defaults from variable if available
-            _min = -DefaultMinMaxRange;
-            _max = DefaultMinMaxRange;
-            _step = 1.0;
-            _value = 0.0;
         }
 
         public string Name
@@ -46,17 +34,17 @@ namespace CalculatorApp.ViewModel
 
         public double Min
         {
-            get => _min;
+            get => _variable.Min;
             set
             {
-                if (_min != value)
+                if (_variable.Min != value)
                 {
-                    if (value >= _max)
+                    if (value >= _variable.Max)
                     {
-                        _max = value + DefaultMinMaxRange;
+                        _variable.Max = value + DefaultMinMaxRange;
                         OnPropertyChanged(nameof(Max));
                     }
-                    _min = value;
+                    _variable.Min = value;
                     OnPropertyChanged(nameof(Min));
                 }
             }
@@ -64,23 +52,30 @@ namespace CalculatorApp.ViewModel
 
         public double Step
         {
-            get => _step;
-            set => SetProperty(ref _step, value);
+            get => _variable.Step;
+            set
+            {
+                if (_variable.Step != value)
+                {
+                    _variable.Step = value;
+                    OnPropertyChanged(nameof(Step));
+                }
+            }
         }
 
         public double Max
         {
-            get => _max;
+            get => _variable.Max;
             set
             {
-                if (_max != value)
+                if (_variable.Max != value)
                 {
-                    if (value <= _min)
+                    if (value <= _variable.Min)
                     {
-                        _min = value - DefaultMinMaxRange;
+                        _variable.Min = value - DefaultMinMaxRange;
                         OnPropertyChanged(nameof(Min));
                     }
-                    _max = value;
+                    _variable.Max = value;
                     OnPropertyChanged(nameof(Max));
                 }
             }
@@ -88,23 +83,23 @@ namespace CalculatorApp.ViewModel
 
         public double Value
         {
-            get => _value;
+            get => _variable.Value;
             set
             {
-                if (value < _min)
+                if (value < _variable.Min)
                 {
-                    _min = value;
+                    _variable.Min = value;
                     OnPropertyChanged(nameof(Min));
                 }
-                else if (value > _max)
+                else if (value > _variable.Max)
                 {
-                    _max = value;
+                    _variable.Max = value;
                     OnPropertyChanged(nameof(Max));
                 }
 
-                if (_value != value)
+                if (_variable.Value != value)
                 {
-                    _value = value;
+                    _variable.Value = value;
                     VariableUpdated?.Invoke(this, new VariableChangedEventArgs { VariableName = Name, NewValue = value });
                     OnPropertyChanged(nameof(Value));
                 }

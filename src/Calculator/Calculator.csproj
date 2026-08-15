@@ -241,6 +241,11 @@
       <SubType>Designer</SubType>
     </AppxManifest>
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\Calculator.ViewModels\DataLoaders\DefaultFromToCurrency.json">
+      <Link>DataLoaders\DefaultFromToCurrency.json</Link>
+    </Content>
+  </ItemGroup>
   <ItemGroup Condition="'$(IsStoreBuild)' == 'True'">
     <Content Include="Assets\CalculatorAppList.scale-100.png" />
     <Content Include="Assets\CalculatorAppList.scale-125.png" />

@@ -173,18 +173,25 @@ namespace CalculatorApp
         {
         }
 
-        private void CurrencyRefreshButton_Click(object sender, RoutedEventArgs e)
+        private async void CurrencyRefreshButton_Click(object sender, RoutedEventArgs e)
         {
-            // If IsCurrencyLoadingVisible is true that means CurrencyRefreshButton_Click was recently called
-            // and is still executing. In this case there is no reason to process the click.
-            if (!ViewModel.IsCurrencyLoadingVisible)
+            try
             {
-                if (ViewModel.NetworkBehavior == NetworkAccessBehavior.OptIn)
+                if (!ViewModel.IsCurrencyLoadingVisible)
                 {
-                    m_meteredConnectionOverride = true;
-                }
+                    if (ViewModel.NetworkBehavior == NetworkAccessBehavior.OptIn)
+                    {
+                        m_meteredConnectionOverride = true;
+                    }
 
-                ViewModel.RefreshCurrencyRatios();
+                    await ViewModel.RefreshCurrencyRatiosAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                TraceLogger.GetInstance().LogError(
+                    ViewModel.Mode, nameof(CurrencyRefreshButton_Click), ex.Message);
+                Debug.WriteLine($"UnitConverter.CurrencyRefreshButton_Click failed: {ex}");
             }
         }
 
@@ -406,4 +413,3 @@ namespace CalculatorApp
         private Windows.UI.Xaml.DispatcherTimer m_delayTimer;
     }
 }
-

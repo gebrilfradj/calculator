@@ -525,15 +525,29 @@ namespace CalculatorApp.ViewModel
             }
         }
 
-        public void RefreshCurrencyRatios()
+        public async System.Threading.Tasks.Task RefreshCurrencyRatiosAsync()
         {
-            _isCurrencyDataLoaded = false;
-            IsCurrencyLoadingVisible = true;
+            bool finished = false;
+            try
+            {
+                _isCurrencyDataLoaded = false;
+                CurrencyDataLoadFailed = false;
+                IsCurrencyLoadingVisible = true;
 
-            string announcement = AppResourceProvider.GetInstance().GetResourceString("UpdatingCurrencyRates");
-            Announcement = CalculatorAnnouncement.GetUpdateCurrencyRatesAnnouncement(announcement);
+                string announcement = AppResourceProvider.GetInstance().GetResourceString("UpdatingCurrencyRates");
+                Announcement = CalculatorAnnouncement.GetUpdateCurrencyRatesAnnouncement(announcement);
 
-            _currencyDataLoader.LoadData();
+                bool didLoad = await _currencyDataLoader.TryLoadDataFromWebOverrideAsync();
+                finished = true;
+                OnCurrencyDataLoadFinished(didLoad);
+            }
+            finally
+            {
+                if (!finished)
+                {
+                    OnCurrencyDataLoadFinished(false);
+                }
+            }
         }
 
         public void OnValueActivated(IActivatable control)
@@ -1356,7 +1370,12 @@ namespace CalculatorApp.ViewModel
             {
                 _localizedConversionResultFormat = AppResourceProvider.GetInstance().GetResourceString("Format_ConversionResult");
             }
-            return string.Format(_localizedConversionResultFormat, fromValue, fromUnit, toValue, toUnit);
+            return LocalizationStringUtil.GetLocalizedString(
+                _localizedConversionResultFormat,
+                fromValue,
+                fromUnit,
+                toValue,
+                toUnit);
         }
 
         internal void UpdateValue1AutomationName()

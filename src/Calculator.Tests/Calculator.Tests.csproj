@@ -108,6 +108,9 @@
     <Content Include="Assets\Square44x44Logo.png" />
     <Content Include="Assets\Wide310x150Logo.png" />
     <Content Include="Assets\SplashScreen.png" />
+    <Content Include="..\Calculator.ViewModels\DataLoaders\DefaultFromToCurrency.json">
+      <Link>DataLoaders\DefaultFromToCurrency.json</Link>
+    </Content>
   </ItemGroup>
   <ItemGroup>
     <PRIResource Include="..\Calculator\Resources\en-US\Resources.resw">
