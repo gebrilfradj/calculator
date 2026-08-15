@@ -6,7 +6,7 @@
 #include <CppUnitTest.h>
 
 #include "CalcManager/CalculatorHistory.h"
-#include "CalcViewModel/Common/EngineResourceProvider.h"
+#include "EngineResourceProvider.h"
 #include "CalcManager/NumberFormattingUtils.h"
 
 using namespace CalculatorApp;

@@ -36,9 +36,6 @@
     <Deploy Solution="*|x64" />
     <Deploy Solution="*|x86" />
   </Project>
-  <Project Path="CalcViewModelCopyForUT/CalcViewModelCopyForUT.vcxproj" Id="cc9b4fa7-d746-4f52-9401-0ad1b4d6b16d">
-    <Build Solution="*|ARM64" Project="false" />
-  </Project>
   <Project Path="GraphControl/GraphControl.vcxproj" Id="e727a92b-f149-492c-8117-c039a298719b" />
   <Project Path="GraphingImpl/GraphingImpl.vcxproj" Id="52e03a58-b378-4f50-8bfb-f659fb85e790" />
   <Project Path="TraceLogging.Managed/TraceLogging.Managed.csproj" Id="3e4b3ab2-a1e0-4b28-b191-7b423e00b5a1">
