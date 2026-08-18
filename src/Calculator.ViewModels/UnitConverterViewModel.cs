@@ -1114,42 +1114,8 @@ namespace CalculatorApp.ViewModel
                     });
 
                 BuildUnitList(result.Units);
-                AssignSelectedUnit(u => UnitFrom = u, FindUnitInList(result.FromUnit));
-                AssignSelectedUnit(u => UnitTo = u, FindUnitInList(result.ToUnit));
-            }
-        }
-
-        // Assigns a Unit1/Unit2 selection, containing the transient exception the bound
-        // ComboBox can raise during a category change.
-        //
-        // Root cause: setting Unit1/Unit2 pushes the value to ComboBox.SelectedItem via the
-        // compiled x:Bind. When the category changes we rebuild the bound Units collection in
-        // place, and WinUI's ComboBox validates the new selection against its own item
-        // collection, which it refreshes from the ItemsSource change on a later (deferred)
-        // pass. If the selection is applied before that refresh completes,
-        // Selector.put_SelectedItem throws ArgumentException (0x80070057, "Value does not fall
-        // within the expected range"). Because this runs synchronously inside the XAML
-        // NavigationView selection handler, an escaping exception fail-fasts the whole process.
-        //
-        // This is a UI-realization timing race inside the control, not a data error: the
-        // assignment sets the Unit1/Unit2 backing field before the throw, and the ComboBox
-        // reconciles its selection on its next layout pass, so the displayed selection ends up
-        // correct. The C++/CX original avoided the throw because classic {Binding} routed the
-        // selection through the AlwaysSelectedCollectionView (ICollectionView) currency, which
-        // defers gracefully; that currency integration does not reproduce in the C# projection
-        // (reverting to {Binding} instead corrupts the selection via a TwoWay write-back), and
-        // no collection-side change closes the race because the lag lives inside the ComboBox.
-        // So we contain this one specific transient here.
-        private static void AssignSelectedUnit(Action<Unit> setter, Unit value)
-        {
-            try
-            {
-                setter(value);
-            }
-            catch (ArgumentException ex)
-            {
-                System.Diagnostics.Debug.WriteLine(
-                    $"UnitConverterViewModel: ignored transient ComboBox SelectedItem race: {ex.Message}");
+                UnitFrom = FindUnitInList(result.FromUnit);
+                UnitTo = FindUnitInList(result.ToUnit);
             }
         }
 
@@ -1158,7 +1124,7 @@ namespace CalculatorApp.ViewModel
             int currencyCatId = NavCategoryStates.Serialize(ViewMode.Currency);
             var currencyUnits = _currencyDataLoader.GetOrderedUnits(currencyCatId);
 
-            Units.Clear();
+            var units = new ObservableCollection<Unit>();
             Unit fromUnit = null;
             Unit toUnit = null;
             foreach (var cu in currencyUnits)
@@ -1170,36 +1136,42 @@ namespace CalculatorApp.ViewModel
                 var accessibleName = nameValue1 + " " + nameValue2;
 
                 var unit = new Unit(cu.Id, displayName, cu.Abbreviation, accessibleName, false);
-                Units.Add(unit);
+                units.Add(unit);
 
                 if (cu.IsConversionSource) fromUnit = unit;
                 if (cu.IsConversionTarget) toUnit = unit;
             }
 
-            if (Units.Count == 0)
+            if (units.Count == 0)
             {
-                Units.Add(new Unit(-1, "", "", "", false));
+                units.Add(new Unit(-1, "", "", "", false));
             }
 
-            AssignSelectedUnit(u => UnitFrom = u, fromUnit ?? (Units.Count > 0 ? Units[0] : null));
-            AssignSelectedUnit(u => UnitTo = u, toUnit ?? (Units.Count > 1 ? Units[1] : Units.Count > 0 ? Units[0] : null));
+            // Publish a complete source before selected units so ComboBox never resolves them
+            // against the previous category's items.
+            Units = units;
+            UnitFrom = fromUnit ?? (Units.Count > 0 ? Units[0] : null);
+            UnitTo = toUnit ?? (Units.Count > 1 ? Units[1] : Units.Count > 0 ? Units[0] : null);
         }
 
         private void BuildUnitList(CalcManager.Interop.UnitWrapper[] modelUnits)
         {
-            Units.Clear();
+            var units = new ObservableCollection<Unit>();
             foreach (var u in modelUnits)
             {
                 if (!u.IsWhimsical)
                 {
-                    Units.Add(CreateUnit(u));
+                    units.Add(CreateUnit(u));
                 }
             }
 
-            if (Units.Count == 0)
+            if (units.Count == 0)
             {
-                Units.Add(new Unit(-1, "", "", "", false));
+                units.Add(new Unit(-1, "", "", "", false));
             }
+
+            // Replacing the collection makes the ItemsSource update atomic for the old ComboBox UI.
+            Units = units;
         }
 
         private static Unit CreateUnit(CalcManager.Interop.UnitWrapper unit)

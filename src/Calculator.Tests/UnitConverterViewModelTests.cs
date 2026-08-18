@@ -527,6 +527,50 @@ namespace Calculator.Tests
         }
 
         [TestMethod]
+        public void CategorySwitchPublishesNewUnitsBeforeSelectedUnits()
+        {
+            var viewModel = new UnitConverterViewModel();
+            var originalCollection = viewModel.Units;
+            var originalUnits = originalCollection.Select(unit => unit.ModelUnitID()).ToList();
+            int sequence = 0;
+            int unitsChanged = -1;
+            int unit1Changed = -1;
+            int unit2Changed = -1;
+
+            viewModel.PropertyChanged += (sender, args) =>
+            {
+                sequence++;
+                if (args.PropertyName == nameof(UnitConverterViewModel.Units))
+                {
+                    unitsChanged = sequence;
+                }
+                else if (args.PropertyName == nameof(UnitConverterViewModel.Unit1))
+                {
+                    unit1Changed = sequence;
+                }
+                else if (args.PropertyName == nameof(UnitConverterViewModel.Unit2))
+                {
+                    unit2Changed = sequence;
+                }
+            };
+
+            var other = viewModel.Categories.First(
+                category => category.GetModelCategoryId() != viewModel.CurrentCategory.GetModelCategoryId()
+                    && category.GetModelCategoryId() != NavCategoryStates.Serialize(ViewMode.Currency));
+            viewModel.CurrentCategory = other;
+
+            Assert.AreNotSame(originalCollection, viewModel.Units);
+            CollectionAssert.AreEqual(
+                originalUnits,
+                originalCollection.Select(unit => unit.ModelUnitID()).ToList());
+            Assert.IsTrue(unitsChanged > 0);
+            Assert.IsTrue(unit1Changed > unitsChanged);
+            Assert.IsTrue(unit2Changed > unitsChanged);
+            Assert.IsTrue(viewModel.Units.Contains(viewModel.Unit1));
+            Assert.IsTrue(viewModel.Units.Contains(viewModel.Unit2));
+        }
+
+        [TestMethod]
         public void InputFollowsTheActiveValueAndIsFormattedForDisplay()
         {
             var viewModel = new UnitConverterViewModel();
@@ -576,7 +620,12 @@ namespace Calculator.Tests
 
             for (int attempt = 0; attempt < 100; attempt++)
             {
-                if (viewModel.Units.Count > 1 && viewModel.Units[0].ModelUnitID() != -1)
+                if (viewModel.Units.Count > 1
+                    && viewModel.Units[0].ModelUnitID() != -1
+                    && viewModel.Unit1 != null
+                    && viewModel.Unit2 != null
+                    && viewModel.Units.Contains(viewModel.Unit1)
+                    && viewModel.Units.Contains(viewModel.Unit2))
                 {
                     return;
                 }
